@@ -2,13 +2,12 @@
 from typing import Any
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from ora.state import ResearchState, Source, Finding
 from ora.prompts import RESEARCHER_PROMPT
 from ora.tools.search import web_search
 from ora.tools.scrape import scrape_page
-from ora.config import load_config, get_researcher_model
+from ora.config import load_config, get_researcher_model, get_llm
 
 
 def generate_search_queries(query: str, intensity: int) -> list[str]:
@@ -36,9 +35,8 @@ async def researcher_node(
     """Researcher LangGraph node. Searches, scrapes, and evaluates sources."""
     settings = load_config()
     model_name = get_researcher_model(settings)
-    model_id = model_name.split(":")[-1]
 
-    llm = ChatOpenAI(model=model_id, temperature=0)
+    llm = get_llm(model_name, temperature=0)
     tools = [web_search, scrape_page]
 
     intensity = state.get("intensity", 2)

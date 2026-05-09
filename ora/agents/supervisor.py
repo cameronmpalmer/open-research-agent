@@ -1,10 +1,9 @@
 """Supervisor agent node for LangGraph."""
 from typing import Any, Literal
 from langchain_core.runnables import RunnableConfig
-from langchain_openai import ChatOpenAI
 from ora.state import ResearchState
 from ora.prompts import SUPERVISOR_PLAN_PROMPT
-from ora.config import load_config
+from ora.config import load_config, get_llm
 
 
 async def plan_node(
@@ -12,10 +11,7 @@ async def plan_node(
 ) -> dict[str, Any]:
     """Generate a research plan for user review."""
     settings = load_config()
-    llm = ChatOpenAI(
-        model=settings.models.default.split(":")[-1],
-        temperature=0,
-    )
+    llm = get_llm(settings.models.default, temperature=0)
 
     prompt = SUPERVISOR_PLAN_PROMPT.format(
         query=state.get("query", ""),

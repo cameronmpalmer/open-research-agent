@@ -1,21 +1,23 @@
 """Tests for configuration loading."""
 import os
 import tempfile
-from ora.config import load_config, ORASettings
+from ora.config import load_config, ORASettings, get_researcher_model, get_reviewer_model
 
 
 class TestORASettings:
     def test_defaults(self):
         settings = ORASettings()
-        assert settings.models.default == "openai:gpt-4.1-mini"
+        assert settings.models.default == "deepseek-chat"
         assert settings.search.provider == "firecrawl"
         assert settings.limits.max_revisions == 3
         assert settings.limits.default_intensity == 2
+        assert settings.deepseek_base_url == "https://api.deepseek.com"
+        assert settings.models.reviewer == "deepseek-reasoner"
 
     def test_env_override(self, monkeypatch):
-        monkeypatch.setenv("ORA_MODELS__DEFAULT", "anthropic:claude-sonnet-4-20250514")
+        monkeypatch.setenv("ORA_MODELS__DEFAULT", "deepseek-chat")
         settings = ORASettings()
-        assert settings.models.default == "anthropic:claude-sonnet-4-20250514"
+        assert settings.models.default == "deepseek-chat"
 
 
 class TestLoadConfig:
@@ -26,3 +28,26 @@ class TestLoadConfig:
             config = load_config(f.name)
             assert config.limits.default_intensity == 4
             os.unlink(f.name)
+
+    def test_get_researcher_model_defaults_to_default(self):
+        settings = ORASettings()
+        assert get_researcher_model(settings) == "deepseek-chat"
+
+    def test_get_researcher_model_uses_researcher_override(self):
+        from ora.config import ModelSettings
+        settings = ORASettings(models=ModelSettings(researcher="deepseek-reasoner"))
+        assert get_researcher_model(settings) == "deepseek-reasoner"
+
+    def test_get_reviewer_model_defaults_to_deepseek_reasoner(self):
+        settings = ORASettings()
+        assert get_reviewer_model(settings) == "deepseek-reasoner"
+
+    def test_get_reviewer_model_uses_reviewer_override(self):
+        from ora.config import ModelSettings
+        settings = ORASettings(models=ModelSettings(reviewer="deepseek-chat"))
+        assert get_reviewer_model(settings) == "deepseek-chat"
+
+    def test_get_reviewer_model_fallback_when_reviewer_is_none(self):
+        from ora.config import ModelSettings
+        settings = ORASettings(models=ModelSettings(reviewer=None))
+        assert get_reviewer_model(settings) == "deepseek-reasoner"

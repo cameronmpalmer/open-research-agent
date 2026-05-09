@@ -1,10 +1,9 @@
 """Writer agent node for LangGraph."""
 from typing import Any
 from langchain_core.runnables import RunnableConfig
-from langchain_openai import ChatOpenAI
 from ora.state import ResearchState
 from ora.prompts import WRITER_PROMPT
-from ora.config import load_config, get_researcher_model
+from ora.config import load_config, get_researcher_model, get_llm
 
 
 def _format_findings_for_prompt(findings: list) -> str:
@@ -36,10 +35,7 @@ async def writer_node(
     settings = load_config()
     model_name = get_researcher_model(settings)
 
-    llm = ChatOpenAI(
-        model=model_name.split(":")[-1],
-        temperature=0.3,
-    )
+    llm = get_llm(model_name, temperature=0.3)
 
     findings_raw = state.get("findings", [])
     findings_text = _format_findings_for_prompt(findings_raw)

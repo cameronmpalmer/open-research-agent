@@ -2,10 +2,9 @@
 import json
 from typing import Any
 from langchain_core.runnables import RunnableConfig
-from langchain.chat_models import init_chat_model
 from ora.state import ResearchState, ReviewVerdict
 from ora.prompts import REVIEWER_PROMPT
-from ora.config import load_config, get_reviewer_model
+from ora.config import load_config, get_reviewer_model, get_llm
 
 
 def parse_reviewer_output(output: str) -> ReviewVerdict:
@@ -54,7 +53,7 @@ async def reviewer_node(
     settings = load_config()
     model_name = get_reviewer_model(settings)
 
-    llm = init_chat_model(model_name, temperature=0.2)
+    llm = get_llm(model_name, temperature=0.2)
 
     prompt_text = REVIEWER_PROMPT.format(
         query=state.get("query", ""),

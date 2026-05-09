@@ -17,9 +17,9 @@ class SearchSettings(BaseModel):
 
 
 class ModelSettings(BaseModel):
-    default: str = "openai:gpt-4.1-mini"
+    default: str = "deepseek-chat"
     researcher: Optional[str] = None
-    reviewer: Optional[str] = None
+    reviewer: Optional[str] = "deepseek-reasoner"
 
 
 class OutputSettings(BaseModel):
@@ -41,6 +41,7 @@ class ORASettings(BaseSettings):
     search: SearchSettings = Field(default_factory=SearchSettings)
     output: OutputSettings = Field(default_factory=OutputSettings)
     limits: LimitSettings = Field(default_factory=LimitSettings)
+    deepseek_base_url: str = "https://api.deepseek.com"
 
 
 def load_config(config_path: Optional[str] = None) -> ORASettings:
@@ -64,6 +65,8 @@ def load_config(config_path: Optional[str] = None) -> ORASettings:
                 settings.output = OutputSettings(**yaml_data["output"])
             if "limits" in yaml_data:
                 settings.limits = LimitSettings(**yaml_data["limits"])
+            if "deepseek_base_url" in yaml_data:
+                settings.deepseek_base_url = yaml_data["deepseek_base_url"]
 
     return settings
 
@@ -74,11 +77,24 @@ def get_researcher_model(settings: ORASettings) -> str:
 
 
 def get_reviewer_model(settings: ORASettings) -> str:
-    """Get the reviewer model, falling back with cross-model logic."""
-    if settings.models.reviewer:
-        return settings.models.reviewer
-    # Default: pick opposite provider from researcher
-    researcher = get_researcher_model(settings)
-    if researcher.startswith("openai:"):
-        return "anthropic:claude-sonnet-4-20250514"
-    return "openai:gpt-4.1"
+    """Get the reviewer model, falling back to deepseek-reasoner."""
+    return settings.models.reviewer or "deepseek-reasoner"
+
+
+def get_llm(model_name: str, temperature: float = 0.0):
+    """Get a DeepSeek-configured ChatOpenAI instance.
+
+    Strips any 'provider:' prefix from model_name for backward compatibility.
+    Uses DEEPSEEK_API_KEY with fallback to OPENAI_API_KEY.
+    """
+    from langchain_openai import ChatOpenAI
+
+    settings = load_config()
+    # Strip legacy provider: prefix (e.g. "openai:gpt-4.1-mini" -> "gpt-4.1-mini")
+    clean_name = model_name.split(":", 1)[-1] if ":" in model_name else model_name
+    return ChatOpenAI(
+        model=clean_name,
+        temperature=temperature,
+        base_url=settings.deepseek_base_url,
+        api_key=os.environ.get("DEEPSEEK_API_KEY", os.environ.get("OPENAI_API_KEY", "")),
+    )
