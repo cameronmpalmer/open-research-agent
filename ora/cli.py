@@ -28,7 +28,8 @@ def _print_markdown(text: str):
     """Render markdown to the terminal using rich."""
     from rich.console import Console
     from rich.markdown import Markdown
-    console = Console()
+    from rich.style import Style
+    console = Console(style=Style(bgcolor=None))
     console.print(Markdown(text))
 
 
