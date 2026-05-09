@@ -68,11 +68,11 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         intensity = 3
 
     click.echo(f"ORA Research: {query}")
+    settings = load_config()
     researcher_model_name = model or settings.models.researcher or settings.models.default
     reviewer_model_name = reviewer_model or settings.models.reviewer or "deepseek-v4-pro"
     click.echo(f"  Intensity: {intensity} | Researcher: {researcher_model_name} | Reviewer: {reviewer_model_name}")
 
-    settings = load_config()
     if model:
         settings.models.researcher = model
     if reviewer_model:
