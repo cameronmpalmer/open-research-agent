@@ -1,8 +1,14 @@
 """Click CLI for Open Research Agent (ORA)."""
+import asyncio
 import os
 import yaml
 import click
 from ora.config import load_config
+
+
+def _run_async(coro):
+    """Run an async function from sync Click command."""
+    return asyncio.run(coro)
 
 
 @click.group()
@@ -60,7 +66,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     }
 
     click.echo("  Generating research plan...")
-    plan_result = graph.invoke(initial_state, config)
+    plan_result = _run_async(graph.ainvoke(initial_state, config))
     plan = plan_result.get("research_plan", "No plan generated.")
     click.echo(f"\n{plan}\n")
 
@@ -72,7 +78,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     plan_result["revision_count"] = plan_result.get("revision_count", 0)
 
     click.echo("  Researching...")
-    final_state = graph.invoke(plan_result, config)
+    final_state = _run_async(graph.ainvoke(plan_result, config))
 
     revision_count = 0
     while revision_count < max_revisions:
@@ -89,7 +95,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         click.echo(f"  Revision {revision_count + 1}/{max_revisions} (reviewer: REVISE)")
         revision_count += 1
         final_state["revision_count"] = revision_count
-        final_state = graph.invoke(final_state, config)
+        final_state = _run_async(graph.ainvoke(final_state, config))
 
     draft = final_state.get("draft_report", "No report generated.")
     verdict = final_state.get("review_verdict")
@@ -121,10 +127,10 @@ def plan(query, intensity):
     from ora.graph import build_graph
     graph = build_graph()
 
-    result = graph.invoke(
+    result = _run_async(graph.ainvoke(
         {"query": query, "intensity": intensity, "plan_approved": False, "revision_count": 0},
         {"configurable": {"thread_id": "plan-1"}},
-    )
+    ))
     plan_text = result.get("research_plan", "No plan generated.")
     click.echo(f"Research Plan for: {query}\n")
     click.echo(plan_text)
