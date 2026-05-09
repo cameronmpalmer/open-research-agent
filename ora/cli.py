@@ -164,6 +164,10 @@ def config(show, init):
     config_path = os.path.expanduser("~/.ora/config.yaml")
 
     if init:
+        if os.path.exists(config_path):
+            if not click.confirm(f"Config already exists at {config_path}. Overwrite?"):
+                click.echo("Aborted.")
+                return
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
         default_config = {
             "models": {
