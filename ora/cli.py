@@ -5,7 +5,7 @@ import os
 import warnings
 import yaml
 import click
-from ora.config import load_config
+from ora.config import load_config, get_researcher_model
 
 logging.captureWarnings(True)
 warnings.filterwarnings("ignore", message=".*allowed_objects.*")
@@ -189,10 +189,13 @@ def config(show, init):
 
     settings = load_config()
     click.echo(f"Config file: {config_path}")
-    click.echo(f"Default model: {settings.models.default}")
-    click.echo(f"Researcher: {settings.models.researcher or '(default)'}")
-    click.echo(f"Reviewer: {settings.models.reviewer or '(auto: opposite provider)'}")
-    click.echo(f"Search: {settings.search.provider}")
+    click.echo()
+    click.echo(f"Supervisor (planning & routing): {settings.models.supervisor or 'deepseek-v4-pro'}")
+    click.echo(f"Researcher (web search & source eval): {get_researcher_model(settings)}")
+    click.echo(f"Writer (report synthesis): {settings.models.researcher or settings.models.default}")
+    click.echo(f"Reviewer (adversarial audit): {settings.models.reviewer or 'deepseek-v4-pro'}")
+    click.echo()
+    click.echo(f"Search backend: {settings.search.provider}")
     click.echo(f"Max revisions: {settings.limits.max_revisions}")
 
 
