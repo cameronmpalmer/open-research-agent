@@ -3,7 +3,7 @@ from typing import Any, Literal
 from langchain_core.runnables import RunnableConfig
 from ora.state import ResearchState
 from ora.prompts import SUPERVISOR_PLAN_PROMPT
-from ora.config import load_config, get_llm
+from ora.config import load_config, get_llm, get_supervisor_model
 
 
 async def plan_node(
@@ -11,7 +11,8 @@ async def plan_node(
 ) -> dict[str, Any]:
     """Generate a research plan for user review."""
     settings = load_config()
-    llm = get_llm(settings.models.default, temperature=0)
+    model_name = get_supervisor_model(settings)
+    llm = get_llm(model_name, temperature=0)
 
     prompt = SUPERVISOR_PLAN_PROMPT.format(
         query=state.get("query", ""),

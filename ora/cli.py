@@ -141,9 +141,10 @@ def config(show, init):
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
         default_config = {
             "models": {
-                "default": "openai:gpt-4.1-mini",
-                "researcher": "openai:gpt-4.1",
-                "reviewer": "anthropic:claude-sonnet-4-20250514",
+                "default": "deepseek-v4-flash",
+                "researcher": "deepseek-v4-flash",
+                "supervisor": "deepseek-v4-pro",
+                "reviewer": "deepseek-v4-pro",
             },
             "search": {"provider": "firecrawl"},
             "limits": {"max_revisions": 3, "default_intensity": 2},

@@ -17,9 +17,10 @@ class SearchSettings(BaseModel):
 
 
 class ModelSettings(BaseModel):
-    default: str = "deepseek-chat"
+    default: str = "deepseek-v4-flash"
     researcher: Optional[str] = None
-    reviewer: Optional[str] = "deepseek-reasoner"
+    supervisor: Optional[str] = None
+    reviewer: Optional[str] = "deepseek-v4-pro"
 
 
 class OutputSettings(BaseModel):
@@ -76,9 +77,14 @@ def get_researcher_model(settings: ORASettings) -> str:
     return settings.models.researcher or settings.models.default
 
 
+def get_supervisor_model(settings: ORASettings) -> str:
+    """Get the supervisor model, falling back to deepseek-v4-pro."""
+    return settings.models.supervisor or "deepseek-v4-pro"
+
+
 def get_reviewer_model(settings: ORASettings) -> str:
-    """Get the reviewer model, falling back to deepseek-reasoner."""
-    return settings.models.reviewer or "deepseek-reasoner"
+    """Get the reviewer model, falling back to deepseek-v4-pro."""
+    return settings.models.reviewer or "deepseek-v4-pro"
 
 
 def get_llm(model_name: str, temperature: float = 0.0):
