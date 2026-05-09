@@ -103,6 +103,14 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     click.echo()
     final_state = _spin(graph.ainvoke(plan_result, config), message="Researching...")
 
+    sources_count = len(final_state.get("sources", []))
+    findings_count = len(final_state.get("findings", []))
+    click.echo(f"  Found {sources_count} sources, {findings_count} findings")
+
+    if not final_state.get("draft_report"):
+        click.echo("  ⚠️  No report was generated. Check your Firecrawl and API key configuration.", err=True)
+        return
+
     revision_count = 0
     while revision_count < max_revisions:
         verdict = final_state.get("review_verdict")
