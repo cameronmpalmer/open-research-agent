@@ -1,9 +1,12 @@
 """Click CLI for Open Research Agent (ORA)."""
 import asyncio
 import os
+import warnings
 import yaml
 import click
 from ora.config import load_config
+
+warnings.filterwarnings("ignore", message=".*allowed_objects.*", module="langgraph")
 
 
 def _run_async(coro):

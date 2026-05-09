@@ -1,4 +1,7 @@
 """LangGraph StateGraph assembly for ORA."""
+import warnings
+warnings.filterwarnings("ignore", message=".*allowed_objects.*", module="langgraph")
+
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from ora.state import ResearchState
