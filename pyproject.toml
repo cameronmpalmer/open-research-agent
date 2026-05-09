@@ -7,14 +7,15 @@ name = "ora"
 version = "0.1.0"
 description = "Open Research Agent - multi-agent research with adversarial review"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 dependencies = [
     "langchain>=0.3.0",
     "langgraph>=0.3.0",
     "langchain-openai>=0.3.0",
     "langchain-anthropic>=0.3.0",
-    "langchain-firecrawl>=0.1.0",
+    "langchain-core>=0.3.0",
+    "firecrawl-py>=1.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "click>=8.0",

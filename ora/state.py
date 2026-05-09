@@ -1,4 +1,5 @@
 """Core state types for the ORA research graph."""
+from operator import add as list_add
 from typing import TypedDict, Literal, Optional, Annotated
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
@@ -46,7 +47,7 @@ class ResearchState(TypedDict, total=False):
     """Shared state for the ORA LangGraph pipeline."""
     # Input
     query: str
-    intensity: int  # 1-5
+    intensity: Literal[1, 2, 3, 4, 5]
 
     # Plan
     research_plan: str
@@ -57,8 +58,8 @@ class ResearchState(TypedDict, total=False):
 
     # Research
     search_queries: list[str]
-    sources: list[Source]
-    findings: list[Finding]
+    sources: Annotated[list[Source], list_add]
+    findings: Annotated[list[Finding], list_add]
 
     # Report
     draft_report: str
