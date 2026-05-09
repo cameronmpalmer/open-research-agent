@@ -24,6 +24,14 @@ def _spin(coro, message="Working..."):
         return asyncio.run(coro)
 
 
+def _print_markdown(text: str):
+    """Render markdown to the terminal using rich."""
+    from rich.console import Console
+    from rich.markdown import Markdown
+    console = Console()
+    console.print(Markdown(text))
+
+
 @click.group()
 @click.version_option(version="0.1.0", prog_name="ora")
 def main():
@@ -80,7 +88,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
 
     plan_result = _spin(graph.ainvoke(initial_state, config), message="Generating research plan...")
     plan = plan_result.get("research_plan", "No plan generated.")
-    click.echo(f"\n{plan}\n")
+    _print_markdown(plan)
 
     if not click.confirm("  Approve this plan and begin research?"):
         click.echo("  Research cancelled.")
@@ -127,7 +135,8 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
             f.write(final_report)
         click.echo(f"Report saved to {output}")
     else:
-        click.echo(f"\n{final_report}")
+        click.echo()
+        _print_markdown(final_report)
 
 
 @main.command()
@@ -143,8 +152,8 @@ def plan(query, intensity):
         {"configurable": {"thread_id": "plan-1"}},
     ), message="Generating research plan...")
     plan_text = result.get("research_plan", "No plan generated.")
-    click.echo(f"Research Plan for: {query}\n")
-    click.echo(plan_text)
+    click.echo(f"\nResearch Plan for: {query}\n")
+    _print_markdown(plan_text)
 
 
 @main.command()
