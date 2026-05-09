@@ -196,6 +196,7 @@ def config(show, init):
     click.echo(f"Reviewer (adversarial audit): {settings.models.reviewer or 'deepseek-v4-pro'}")
     click.echo()
     click.echo(f"Search backend: {settings.search.provider}")
+    click.echo(f"Firecrawl URL: {settings.search.firecrawl_api_url}")
     click.echo(f"Max revisions: {settings.limits.max_revisions}")
 
 
