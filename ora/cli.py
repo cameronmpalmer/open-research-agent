@@ -16,6 +16,14 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
+def _spin(coro, message="Working..."):
+    """Run an async coroutine with a rich spinner."""
+    from rich.console import Console
+    console = Console()
+    with console.status(message, spinner="dots"):
+        return asyncio.run(coro)
+
+
 @click.group()
 @click.version_option(version="0.1.0", prog_name="ora")
 def main():
@@ -70,8 +78,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         "revision_count": 0,
     }
 
-    click.echo("  Generating research plan...")
-    plan_result = _run_async(graph.ainvoke(initial_state, config))
+    plan_result = _spin(graph.ainvoke(initial_state, config), message="Generating research plan...")
     plan = plan_result.get("research_plan", "No plan generated.")
     click.echo(f"\n{plan}\n")
 
@@ -82,8 +89,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     plan_result["plan_approved"] = True
     plan_result["revision_count"] = plan_result.get("revision_count", 0)
 
-    click.echo("  Researching...")
-    final_state = _run_async(graph.ainvoke(plan_result, config))
+    final_state = _spin(graph.ainvoke(plan_result, config), message="Researching...")
 
     revision_count = 0
     while revision_count < max_revisions:
@@ -97,10 +103,10 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         if v == "PASS":
             break
 
-        click.echo(f"  Revision {revision_count + 1}/{max_revisions} (reviewer: REVISE)")
+        click.echo(f"  Reviewer requested revision {revision_count + 1}/{max_revisions}")
         revision_count += 1
         final_state["revision_count"] = revision_count
-        final_state = _run_async(graph.ainvoke(final_state, config))
+        final_state = _spin(graph.ainvoke(final_state, config), message="Revising...")
 
     draft = final_state.get("draft_report", "No report generated.")
     verdict = final_state.get("review_verdict")
@@ -132,10 +138,10 @@ def plan(query, intensity):
     from ora.graph import build_graph
     graph = build_graph()
 
-    result = _run_async(graph.ainvoke(
+    result = _spin(graph.ainvoke(
         {"query": query, "intensity": intensity, "plan_approved": False, "revision_count": 0},
         {"configurable": {"thread_id": "plan-1"}},
-    ))
+    ), message="Generating research plan...")
     plan_text = result.get("research_plan", "No plan generated.")
     click.echo(f"Research Plan for: {query}\n")
     click.echo(plan_text)
