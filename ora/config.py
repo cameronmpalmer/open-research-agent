@@ -90,17 +90,22 @@ def get_reviewer_model(settings: ORASettings) -> str:
 def get_llm(model_name: str, temperature: float = 0.0):
     """Get a DeepSeek-configured ChatOpenAI instance.
 
-    Strips any 'provider:' prefix from model_name for backward compatibility.
     Uses DEEPSEEK_API_KEY with fallback to OPENAI_API_KEY.
+    Raises ValueError if no API key is configured.
     """
     from langchain_openai import ChatOpenAI
 
     settings = load_config()
-    # Strip legacy provider: prefix (e.g. "openai:gpt-4.1-mini" -> "gpt-4.1-mini")
+    api_key = os.environ.get("DEEPSEEK_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+    if not api_key:
+        raise ValueError(
+            "No API key configured. Set DEEPSEEK_API_KEY or OPENAI_API_KEY."
+        )
+
     clean_name = model_name.split(":", 1)[-1] if ":" in model_name else model_name
     return ChatOpenAI(
         model=clean_name,
         temperature=temperature,
         base_url=settings.deepseek_base_url,
-        api_key=os.environ.get("DEEPSEEK_API_KEY", os.environ.get("OPENAI_API_KEY", "")),
+        api_key=api_key,
     )
