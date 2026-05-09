@@ -174,7 +174,7 @@ def config(show, init):
             },
             "search": {
                 "provider": "firecrawl",
-                "firecrawl_api_url": "http://localhost:3002",
+                "firecrawl_api_url": "https://api.firecrawl.com",
             },
             "limits": {"max_revisions": 3, "default_intensity": 2},
         }
