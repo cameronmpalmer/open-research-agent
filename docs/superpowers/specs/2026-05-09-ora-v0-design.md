@@ -1,4 +1,4 @@
-# Open Research Audit (ORA) -- v0 Design Spec
+# Open Research Agent (ORA) -- v0 Design Spec
 
 **Date:** 2026-05-09
 **Status:** Draft, pending review

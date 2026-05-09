@@ -1,8 +1,8 @@
-# Open Research Audit (ORA)
+# Open Research Agent (ORA)
 
-An open-source multi-agent research tool that audits its own findings. Built with LangChain and LangGraph.
+An open-source multi-agent research tool with a built-in adversarial reviewer. Built with LangChain and LangGraph.
 
-**ORA** = Open Research Audit. Submit a query with an intensity level, get back calibrated, source-traced research with a built-in adversarial reviewer.
+**ORA** = Open Research Agent. Submit a query with an intensity level, get back calibrated, source-traced research that has been audited by a separate adversarial agent.
 
 ## Status
 
