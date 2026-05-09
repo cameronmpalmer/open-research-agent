@@ -100,6 +100,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     plan_result["plan_approved"] = True
     plan_result["revision_count"] = plan_result.get("revision_count", 0)
 
+    click.echo()
     final_state = _spin(graph.ainvoke(plan_result, config), message="Researching...")
 
     revision_count = 0
