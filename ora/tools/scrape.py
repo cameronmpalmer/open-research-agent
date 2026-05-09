@@ -12,14 +12,9 @@ def scrape_page(url: str) -> str:
     Returns:
         Page content as markdown text.
     """
-    import os
-    from firecrawl import FirecrawlApp
+    from ora.config import get_firecrawl_client
 
-    key = os.environ.get("FIRECRAWL_API_KEY", "")
-    if not key:
-        return "Error: No Firecrawl API key configured."
-
-    app = FirecrawlApp(api_key=key)
+    app = get_firecrawl_client()
     try:
         result = app.scrape_url(url, params={"formats": ["markdown"]})
         content = result.get("markdown", "")

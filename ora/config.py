@@ -14,6 +14,7 @@ class LimitSettings(BaseModel):
 class SearchSettings(BaseModel):
     provider: str = "firecrawl"
     firecrawl_api_key: Optional[str] = None
+    firecrawl_api_url: str = "https://api.firecrawl.com"
 
 
 class ModelSettings(BaseModel):
@@ -85,6 +86,25 @@ def get_supervisor_model(settings: ORASettings) -> str:
 def get_reviewer_model(settings: ORASettings) -> str:
     """Get the reviewer model, falling back to deepseek-v4-pro."""
     return settings.models.reviewer or "deepseek-v4-pro"
+
+
+def get_firecrawl_client():
+    """Get a configured FirecrawlApp instance.
+
+    Uses FIRECRAWL_API_KEY env var or config, and api_url from config.
+    For self-hosted Firecrawl (no auth), leave api_key empty and set
+    FIRECRAWL_API_URL=http://localhost:3002.
+    """
+    from firecrawl import FirecrawlApp
+
+    settings = load_config()
+    api_key = os.environ.get(
+        "FIRECRAWL_API_KEY", settings.search.firecrawl_api_key or ""
+    )
+    api_url = os.environ.get(
+        "FIRECRAWL_API_URL", settings.search.firecrawl_api_url
+    )
+    return FirecrawlApp(api_key=api_key, api_url=api_url)
 
 
 def get_llm(model_name: str, temperature: float = 0.0):

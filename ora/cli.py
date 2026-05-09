@@ -172,7 +172,10 @@ def config(show, init):
                 "supervisor": "deepseek-v4-pro",
                 "reviewer": "deepseek-v4-pro",
             },
-            "search": {"provider": "firecrawl"},
+            "search": {
+                "provider": "firecrawl",
+                "firecrawl_api_url": "http://localhost:3002",
+            },
             "limits": {"max_revisions": 3, "default_intensity": 2},
         }
         with open(config_path, "w") as f:
