@@ -29,6 +29,8 @@ async def researcher_node(
     state: ResearchState, config: RunnableConfig = None
 ) -> dict[str, Any]:
     """Researcher: template-based queries, programmatic search/scrape."""
+    import sys
+    print("DEBUG: researcher_node started", flush=True, file=sys.stderr)
     settings = load_config()
 
     query = state.get("query", "")
