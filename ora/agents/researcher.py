@@ -68,10 +68,24 @@ async def researcher_node(
         ]
     }
 
-    result = await graph.ainvoke(inputs)
+    try:
+        result = await graph.ainvoke(inputs)
+    except Exception as e:
+        error_msg = f"Research agent error: {str(e)}"
+        return {
+            "search_queries": queries[:query_count],
+            "sources": [],
+            "findings": [Finding(claim=error_msg, confidence="Unknown")],
+            "messages": [f"Error: {error_msg}"],
+        }
+
     messages = result.get("messages", [])
     output = messages[-1].content if messages else ""
 
+    if not output and messages and hasattr(messages[-1], 'response_metadata') and messages[-1].response_metadata:
+        output = f"Agent completed. Check intermediate messages for details."
+    elif not output:
+        output = "Research agent produced no output."
     return {
         "search_queries": queries[:query_count],
         "sources": _extract_sources_from_output(output),
