@@ -80,7 +80,8 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
 
     from ora.graph import build_graph
     graph = build_graph()
-    config = {"configurable": {"thread_id": "research-1"}}
+    import uuid
+    config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 
     initial_state = {
         "query": query,
@@ -167,9 +168,10 @@ def plan(query, intensity):
     from ora.graph import build_graph
     graph = build_graph()
 
+    import uuid
     result = _spin(graph.ainvoke(
         {"query": query, "intensity": intensity, "plan_approved": False, "revision_count": 0},
-        {"configurable": {"thread_id": "plan-1"}},
+        {"configurable": {"thread_id": str(uuid.uuid4())}},
     ), message="Generating research plan...")
     plan_text = result.get("research_plan", "No plan generated.")
     click.echo(f"\nResearch Plan for: {query}\n")
