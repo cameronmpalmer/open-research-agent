@@ -111,8 +111,9 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     if not draft_len and raw_msgs:
         for i, m in enumerate(raw_msgs):
             c = m.content if hasattr(m, 'content') else str(m)
-            has_tc = hasattr(m, 'tool_calls') and m.tool_calls
-            click.echo(f"    [{i}] {type(m).__name__} content={len(c)} chars tool_calls={len(m.tool_calls) if has_tc else 0}")
+            click.echo(f"    [{i}] {type(m).__name__} content={len(c)} chars")
+            if i > 0:  # Show researcher output (skip plan)
+                click.echo(f"    ---\n{c[:500]}\n---")
 
     if not final_state.get("draft_report"):
         click.echo("  ⚠️  No report was generated. Check your Firecrawl and API key configuration.", err=True)
