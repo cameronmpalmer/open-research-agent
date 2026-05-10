@@ -1,5 +1,7 @@
 """Firecrawl scrape tool for LangChain."""
+import requests
 from langchain_core.tools import tool
+from ora.config import get_firecrawl_client
 
 
 @tool
@@ -12,12 +14,20 @@ def scrape_page(url: str) -> str:
     Returns:
         Page content as markdown text.
     """
-    from ora.config import get_firecrawl_client
-
-    app = get_firecrawl_client()
     try:
-        result = app.scrape_url(url, params={"formats": ["markdown"]})
-        content = result.get("markdown", "")
+        app = get_firecrawl_client()
+        resp = requests.post(
+            f"{app.api_url}/v2/scrape",
+            json={"url": url, "formats": ["markdown"]},
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
+        data = resp.json()
+
+        if not data.get("success"):
+            return f"Scrape failed for {url}: {data}"
+
+        content = data.get("data", {}).get("markdown", "")
         if not content:
             return f"No content extracted from {url}"
         if len(content) > 8000:
