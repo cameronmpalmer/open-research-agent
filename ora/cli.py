@@ -1,7 +1,7 @@
 """Click CLI for Open Research Agent (ORA)."""
-import asyncio
 import logging
 import os
+import uuid
 import warnings
 import yaml
 import click
@@ -11,17 +11,18 @@ logging.captureWarnings(True)
 warnings.filterwarnings("ignore", message=".*allowed_objects.*")
 
 
-def _run_async(coro):
-    """Run an async function from sync Click command."""
-    return asyncio.run(coro)
-
-
-def _spin(coro, message="Working..."):
-    """Run an async coroutine with a rich spinner."""
+def _spin(func, message="Working..."):
+    """Run a sync function with a rich spinner."""
     from rich.console import Console
+    import asyncio
+    
+    async def _run():
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, func)
+    
     console = Console()
     with console.status(message, spinner="dots"):
-        return asyncio.run(coro)
+        return asyncio.run(_run())
 
 
 def _print_markdown(text: str):
@@ -90,7 +91,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         "revision_count": 0,
     }
 
-    plan_result = _spin(graph.ainvoke(initial_state, config), message="Generating research plan...")
+    plan_result = _spin(lambda: graph.invoke(initial_state, config), message="Generating research plan...")
     plan = plan_result.get("research_plan", "No plan generated.")
     _print_markdown(plan)
 
@@ -102,7 +103,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     plan_result["revision_count"] = plan_result.get("revision_count", 0)
 
     click.echo()
-    final_state = _spin(graph.ainvoke(plan_result, config), message="Researching...")
+    final_state = _spin(lambda: graph.invoke(plan_result, config), message="Researching...")
 
     raw_msgs = final_state.get("messages", [])
     sources_count = len(final_state.get("sources", []))
@@ -135,7 +136,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         click.echo(f"  Reviewer requested revision {revision_count + 1}/{max_revisions}")
         revision_count += 1
         final_state["revision_count"] = revision_count
-        final_state = _spin(graph.ainvoke(final_state, config), message="Revising...")
+        final_state = _spin(lambda: graph.invoke(final_state, config), message="Revising...")
 
     draft = final_state.get("draft_report", "No report generated.")
     verdict = final_state.get("review_verdict")
@@ -169,7 +170,7 @@ def plan(query, intensity):
     graph = build_graph()
 
     import uuid
-    result = _spin(graph.ainvoke(
+    result = _spin(lambda: graph.invoke(
         {"query": query, "intensity": intensity, "plan_approved": False, "revision_count": 0},
         {"configurable": {"thread_id": str(uuid.uuid4())}},
     ), message="Generating research plan...")

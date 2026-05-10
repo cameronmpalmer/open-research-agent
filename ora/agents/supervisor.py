@@ -6,7 +6,7 @@ from ora.prompts import SUPERVISOR_PLAN_PROMPT
 from ora.config import load_config, get_llm, get_supervisor_model
 
 
-async def plan_node(
+def plan_node(
     state: ResearchState, config: RunnableConfig = None
 ) -> dict[str, Any]:
     """Generate a research plan for user review."""

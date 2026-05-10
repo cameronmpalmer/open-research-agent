@@ -41,7 +41,7 @@ def parse_reviewer_output(output: str) -> ReviewVerdict:
         )
 
 
-async def reviewer_node(
+def reviewer_node(
     state: ResearchState, config: RunnableConfig = None
 ) -> dict[str, Any]:
     """Adversarial reviewer LangGraph node.

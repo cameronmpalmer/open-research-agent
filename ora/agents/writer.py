@@ -28,7 +28,7 @@ def _format_findings_for_prompt(findings: list) -> str:
     return "\n".join(lines)
 
 
-async def writer_node(
+def writer_node(
     state: ResearchState, config: RunnableConfig = None
 ) -> dict[str, Any]:
     """Writer LangGraph node. Synthesizes findings into a structured report."""

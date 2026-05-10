@@ -25,12 +25,13 @@ def generate_search_queries(query: str, intensity: int) -> list[str]:
     return [t.format(query=query) for t in templates]
 
 
-async def researcher_node(
+def researcher_node(
     state: ResearchState, config: RunnableConfig = None
 ) -> dict[str, Any]:
-    """Researcher: template-based queries, programmatic search/scrape."""
-    import sys
-    print("DEBUG: researcher_node started", flush=True, file=sys.stderr)
+    """Researcher: template-based queries, programmatic search/scrape.
+    
+    Synchronous node -- uses blocking HTTP calls inside LangGraph's sync execution.
+    """
     settings = load_config()
 
     query = state.get("query", "")
