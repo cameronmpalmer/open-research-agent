@@ -103,9 +103,15 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     click.echo()
     final_state = _spin(graph.ainvoke(plan_result, config), message="Researching...")
 
+    raw_msgs = final_state.get("messages", [])
+    if raw_msgs:
+        last = raw_msgs[-1]
+        last_len = len(last) if isinstance(last, str) else len(last.content if hasattr(last, 'content') else str(last))
+    else:
+        last_len = 0
     sources_count = len(final_state.get("sources", []))
     findings_count = len(final_state.get("findings", []))
-    click.echo(f"  Found {sources_count} sources, {findings_count} findings")
+    click.echo(f"  Found {sources_count} sources, {findings_count} findings (last message: {last_len} chars)")
 
     if not final_state.get("draft_report"):
         click.echo("  ⚠️  No report was generated. Check your Firecrawl and API key configuration.", err=True)
