@@ -107,7 +107,12 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     sources_count = len(final_state.get("sources", []))
     findings_count = len(final_state.get("findings", []))
     draft_len = len(final_state.get("draft_report", ""))
-    click.echo(f"  Messages: {len(raw_msgs)} | Sources: {sources_count} | Findings: {findings_count} | Draft: {draft_len} chars")
+    click.echo(f"  Msgs: {len(raw_msgs)} | Sources: {sources_count} | Findings: {findings_count} | Draft: {draft_len} chars")
+    if not draft_len and raw_msgs:
+        for i, m in enumerate(raw_msgs):
+            c = m.content if hasattr(m, 'content') else str(m)
+            has_tc = hasattr(m, 'tool_calls') and m.tool_calls
+            click.echo(f"    [{i}] {type(m).__name__} content={len(c)} chars tool_calls={len(m.tool_calls) if has_tc else 0}")
 
     if not final_state.get("draft_report"):
         click.echo("  ⚠️  No report was generated. Check your Firecrawl and API key configuration.", err=True)
