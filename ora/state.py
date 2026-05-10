@@ -1,8 +1,18 @@
 """Core state types for the ORA research graph."""
-from operator import add as list_add
-from typing import TypedDict, Literal, Optional, Annotated
+from typing import TypedDict, Literal, Optional, Annotated, Any
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
+
+
+def _list_reducer(left: list | None, right: list | None) -> list:
+    """Merge two lists, handling None defaults from total=False TypedDict."""
+    if left is None and right is None:
+        return []
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left + right
 
 
 class Source(BaseModel):
@@ -58,8 +68,8 @@ class ResearchState(TypedDict, total=False):
 
     # Research
     search_queries: list[str]
-    sources: Annotated[list[Source], list_add]
-    findings: Annotated[list[Finding], list_add]
+    sources: Annotated[list[Source], _list_reducer]
+    findings: Annotated[list[Finding], _list_reducer]
 
     # Report
     draft_report: str
