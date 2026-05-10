@@ -95,12 +95,19 @@ async def researcher_node(
 
 
 def _extract_sources_from_output(output: str) -> list[Source]:
-    """Parse sources from agent output."""
+    """Parse sources from agent output. Extracts URLs from any text format."""
     import re
     from ora.tools.evaluate import evaluate_source
 
-    url_pattern = r'https?://[^\s<>"\')]+'
+    # Match URLs in various formats: raw, markdown links, parenthesized
+    url_pattern = r'https?://[^\s<>"\')\]]+'
     urls = list(set(re.findall(url_pattern, output)))
+
+    # Also extract from markdown links: [text](url)
+    md_links = re.findall(r'\[.*?\]\((https?://[^\)]+)\)', output)
+    urls.extend(md_links)
+    urls = list(set(urls))
+
     sources = []
     for url in urls[:20]:
         source = evaluate_source(url=url, content=output[:500], source_type="unknown")
@@ -109,20 +116,39 @@ def _extract_sources_from_output(output: str) -> list[Source]:
 
 
 def _extract_findings_from_output(output: str) -> list[Finding]:
-    """Parse findings from agent output."""
+    """Parse findings from agent output. Falls back to raw output if parsing fails."""
+    import re
+
     findings = []
     lines = output.split("\n")
     current = ""
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith(("- ", "* ", "1.", "2.", "3.")) and len(stripped) > 10:
+        # Match bullet points, numbered items, and markdown list items
+        is_list_item = (
+            bool(re.match(r'^[-*]\s', stripped)) or
+            bool(re.match(r'^\d+[\.\)]\s', stripped)) or
+            stripped.startswith("- ") or
+            stripped.startswith("* ")
+        )
+        if is_list_item and len(stripped) > 10:
             if current:
                 findings.append(Finding(claim=current[:500]))
-            current = stripped.lstrip("- *1234567890. ")
+            current = re.sub(r'^[-*\d\.\)\s]+', '', stripped).strip()
         elif current:
             current += " " + stripped
+
     if current and len(current) > 10:
         findings.append(Finding(claim=current[:500]))
-    if not findings:
-        findings.append(Finding(claim=output[:500]))
+
+    # Fallback: if no structured findings, capture the raw output
+    if not findings and output.strip():
+        # Try to split on double newlines as paragraph boundaries
+        paragraphs = [p.strip() for p in output.split("\n\n") if len(p.strip()) > 20]
+        if paragraphs:
+            for p in paragraphs[:10]:
+                findings.append(Finding(claim=p[:500]))
+        else:
+            findings.append(Finding(claim=output[:500], notes="Raw agent output"))
+
     return findings
