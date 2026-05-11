@@ -79,11 +79,10 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     if reviewer_model:
         settings.models.reviewer = reviewer_model
 
-    from ora.graph import build_graph
-    graph = build_graph()
-    import uuid
-    config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+    from ora.graph import build_plan_graph, build_research_graph
 
+    # Phase 1: Generate and review research plan
+    plan_graph = build_plan_graph()
     initial_state = {
         "query": query,
         "intensity": intensity,
@@ -91,7 +90,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         "revision_count": 0,
     }
 
-    plan_result = _spin(lambda: graph.invoke(initial_state, config), message="Generating research plan...")
+    plan_result = _spin(lambda: plan_graph.invoke(initial_state), message="Generating research plan...")
     plan = plan_result.get("research_plan", "No plan generated.")
     _print_markdown(plan)
 
@@ -99,66 +98,31 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         click.echo("  Research cancelled.")
         return
 
-    plan_result["plan_approved"] = True
-    plan_result["revision_count"] = plan_result.get("revision_count", 0)
-
+    # Phase 2: Run research pipeline
     click.echo()
-    final_state = _spin(lambda: graph.invoke(plan_result, config), message="Researching...")
+    research_graph = build_research_graph()
+    plan_result["plan_approved"] = True
+    final_state = _spin(lambda: research_graph.invoke(plan_result), message="Researching...")
 
-    raw_msgs = final_state.get("messages", [])
-    sources_count = len(final_state.get("sources", []))
-    findings_count = len(final_state.get("findings", []))
-    draft_len = len(final_state.get("draft_report", ""))
-    click.echo(f"  Msgs: {len(raw_msgs)} | Sources: {sources_count} | Findings: {findings_count} | Draft: {draft_len} chars")
-    if not draft_len and raw_msgs:
-        for i, m in enumerate(raw_msgs):
-            c = m.content if hasattr(m, 'content') else str(m)
-            click.echo(f"    [{i}] {type(m).__name__} content={len(c)} chars")
-            if i > 0:  # Show researcher output (skip plan)
-                click.echo(f"    ---\n{c[:500]}\n---")
+    sources_count = len(final_state.get("sources", []) or [])
+    findings_count = len(final_state.get("findings", []) or [])
+    draft_len = len(final_state.get("draft_report") or "")
+    click.echo(f"  Sources: {sources_count} | Findings: {findings_count} | Draft: {draft_len} chars")
 
     if not final_state.get("draft_report"):
         click.echo("  ⚠️  No report was generated. Check your Firecrawl and API key configuration.", err=True)
         return
 
-    revision_count = 0
-    while revision_count < max_revisions:
-        verdict = final_state.get("review_verdict")
-        if verdict is None:
-            break
-
-        v = verdict.verdict if hasattr(verdict, 'verdict') else \
-            (verdict.get("verdict", "PASS") if isinstance(verdict, dict) else "PASS")
-
-        if v == "PASS":
-            break
-
-        click.echo(f"  Reviewer requested revision {revision_count + 1}/{max_revisions}")
-        revision_count += 1
-        final_state["revision_count"] = revision_count
-        final_state = _spin(lambda: graph.invoke(final_state, config), message="Revising...")
-
+    # Skip revision loop for now (reviewer disabled)
     draft = final_state.get("draft_report", "No report generated.")
-    verdict = final_state.get("review_verdict")
-
-    verdict_str = ""
-    if verdict and not no_review:
-        v = verdict.verdict if hasattr(verdict, 'verdict') else \
-            (verdict.get("verdict", "?") if isinstance(verdict, dict) else "?")
-        b = len(verdict.blocking) if hasattr(verdict, 'blocking') else 0
-        r = len(verdict.required) if hasattr(verdict, 'required') else 0
-        s = len(verdict.suggested) if hasattr(verdict, 'suggested') else 0
-        verdict_str = f"\n\n## Reviewer Gate\n- **Verdict:** {v}\n- **Blocking:** {b}\n- **Required:** {r}\n- **Suggested:** {s}"
-
-    final_report = draft + verdict_str
 
     if output:
         with open(output, "w") as f:
-            f.write(final_report)
+            f.write(draft)
         click.echo(f"Report saved to {output}")
     else:
         click.echo()
-        _print_markdown(final_report)
+        _print_markdown(draft)
 
 
 @main.command()
@@ -166,13 +130,11 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
 @click.option("--intensity", "-i", type=click.IntRange(1, 5), default=2)
 def plan(query, intensity):
     """Generate a research plan without executing research."""
-    from ora.graph import build_graph
-    graph = build_graph()
+    from ora.graph import build_plan_graph
+    graph = build_plan_graph()
 
-    import uuid
     result = _spin(lambda: graph.invoke(
         {"query": query, "intensity": intensity, "plan_approved": False, "revision_count": 0},
-        {"configurable": {"thread_id": str(uuid.uuid4())}},
     ), message="Generating research plan...")
     plan_text = result.get("research_plan", "No plan generated.")
     click.echo(f"\nResearch Plan for: {query}\n")

@@ -28,14 +28,14 @@ Does the report address all aspects of the query?
 ## Output Format
 Return a JSON object:
 ```json
-{
+{{
   "verdict": "PASS" or "REVISE",
   "blocking": ["issue 1", "issue 2"],
   "required": ["issue 1"],
   "suggested": ["issue 1"],
   "contradicting_evidence_found": ["evidence with source"],
-  "confidence_recalibrations": {"claim": "new_level"}
-}
+  "confidence_recalibrations": {{"claim": "new_level"}}
+}}
 ```
 
 ## Critical Rule

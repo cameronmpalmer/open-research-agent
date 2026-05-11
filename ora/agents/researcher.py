@@ -52,22 +52,25 @@ def researcher_node(
         r = web_search.invoke({"query": q})
         log.append(f"  Result: {len(r)} chars")
 
-        # Debug: show search result format
-        if r:
-            log.append(f"  Preview: {r[:200]}")
-
         urls = re.findall(r'https?://[^\s<>"\')\]]+', r)
         log.append(f"  URLs found: {len(urls)}")
-        if urls:
-            log.append(f"  First URL: {urls[0][:80]}")
 
-        for url in urls[:1]:
+        scraped_count = 0
+        for url in urls[:3]:  # scrape up to 3 URLs per query
             c = scrape_page.invoke({"url": url})
-            log.append(f"  Scraped: {len(c)} chars from {url[:60]}")
-            if c and "error" not in c[:50].lower() and "Error" not in c[:50]:
+            is_error = (
+                c.startswith("Scrape error") or
+                c.startswith("Scrape failed") or
+                c.startswith("No content extracted")
+            )
+            log.append(f"  Scraped: {len(c)} chars from {url[:60]} {'(FAIL)' if is_error else ''}")
+            if not is_error:
                 source = evaluate_source(url=url, content=c, source_type="unknown")
                 sources.append(source)
                 findings.append(Finding(claim=c[:500], supporting_sources=[url]))
+                scraped_count += 1
+                if scraped_count >= 2:  # limit to 2 successful scrapes per query
+                    break
 
     if not findings:
         results_text = web_search.invoke({"query": query})
