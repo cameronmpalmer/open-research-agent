@@ -4,12 +4,12 @@
 
 The current `ora research` command shows a single `Researching...` spinner while the researcher searches, scrapes, evaluates sources, and the writer drafts the report. This hides useful activity and makes slow Firecrawl calls or blocked scrapes hard to diagnose.
 
-This design adds live, line-by-line progress events for verbose mode. The goal is better visibility without building a full terminal dashboard.
+This design adds live, line-by-line progress events by default. The goal is better visibility without building a full terminal dashboard, with a quiet mode for users who want spinner-only output.
 
 ## Goals
 
-- Show what ORA is doing during research when the user passes `--verbose`.
-- Keep the default non-verbose output clean and spinner-based.
+- Show what ORA is doing during research by default.
+- Keep the quiet output clean and spinner-based.
 - Make progress reporting reusable by researcher, writer, and future reviewer nodes.
 - Avoid coupling agent code directly to Click, Rich, or terminal output.
 - Preserve the current two-phase CLI flow: plan approval, then research.
@@ -74,7 +74,7 @@ def emit_progress(config, message: str, kind: str = "info") -> None:
 
 Agents call `emit_progress()` with the `RunnableConfig` they already receive. This keeps agent nodes independent from the CLI and lets future renderers consume the same event stream.
 
-The CLI passes a callback only in verbose mode:
+The CLI passes a callback by default and only skips it in quiet mode:
 
 ```python
 graph_config = {
@@ -85,7 +85,7 @@ graph_config = {
 research_graph.invoke(plan_result, graph_config)
 ```
 
-In non-verbose mode, no callback is passed and `emit_progress()` becomes a no-op.
+In quiet mode, no callback is passed and `emit_progress()` becomes a no-op.
 
 ## Components
 
@@ -101,8 +101,8 @@ Responsibilities:
 
 Responsibilities:
 
-- When `--verbose` is false, keep the existing spinner behavior.
-- When `--verbose` is true, pass a progress callback and avoid using a spinner that conflicts with line output.
+- When `--quiet` is false, pass a progress callback and avoid using a spinner that conflicts with line output.
+- When `--quiet` is true, keep the existing spinner behavior.
 - Render event kinds consistently:
   - `search` → `🔎`
   - `scrape` → `🌐`
@@ -134,7 +134,7 @@ Emit progress for:
 
 ## Data Flow
 
-1. User runs `ora research "..." --verbose`.
+1. User runs `ora research "..."`.
 2. CLI generates and displays the plan as it does today.
 3. After approval, CLI builds the research graph and passes `progress_callback` in the graph config.
 4. Researcher and writer nodes call `emit_progress()` as they work.

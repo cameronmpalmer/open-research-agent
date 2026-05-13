@@ -1,28 +1,72 @@
 """Click CLI for Open Research Agent (ORA)."""
 import logging
 import os
-import uuid
+import re
 import warnings
-import yaml
+from datetime import datetime
+
 import click
-from ora.config import load_config, get_researcher_model
+import yaml
+from ora.config import get_researcher_model, load_config
 
 logging.captureWarnings(True)
-warnings.filterwarnings("ignore", message=".*allowed_objects.*")
+warnings.filterwarnings("ignore", message=".*allowed_objects.*", module="langgraph")
+
+
+def _slugify(query: str) -> str:
+    """Turn a research query into a filesystem-safe slug."""
+    slug = re.sub(r"[^\w\s-]", "", query).strip().lower()
+    slug = re.sub(r"[-\s]+", "-", slug)
+    return slug[:60]
+
+
+def _auto_filename(query: str) -> str:
+    """Generate a timestamped output filename from a query."""
+    ts = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    return f"{_slugify(query)}-{ts}.md"
 
 
 def _spin(func, message="Working..."):
-    """Run a sync function with a rich spinner."""
+    """Run a sync function with a rich spinner and cycling dots.
+
+    The status message cycles its trailing dots (., .., ...) while
+    the function runs in a background thread.
+    """
     from rich.console import Console
-    import asyncio
-    
-    async def _run():
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, func)
-    
+    import threading
+    import time
+
+    base = message.rstrip(".")
+
+    result = None
+    exception = None
+    done = threading.Event()
+
+    def _worker():
+        nonlocal result, exception
+        try:
+            result = func()
+        except Exception as exc:
+            exception = exc
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+    dots = 0
     console = Console()
-    with console.status(message, spinner="dots"):
-        return asyncio.run(_run())
+    with console.status(f"{base}.", spinner="dots") as status:
+        while not done.wait(timeout=0.4):
+            dots = (dots + 1) % 3
+            suffix = "." * (dots + 1)
+            status.update(f"{base}{suffix}")
+
+    thread.join()
+
+    if exception:
+        raise exception
+    return result
 
 
 def _print_markdown(text: str):
@@ -32,6 +76,25 @@ def _print_markdown(text: str):
     from rich.style import Style
     console = Console(style=Style(bgcolor=None))
     console.print(Markdown(text))
+
+
+def _format_progress_event(event: dict) -> str:
+    """Format a progress event for line-by-line verbose output."""
+    icons = {
+        "search": "🔎",
+        "scrape": "🌐",
+        "success": "✓",
+        "error": "✗",
+        "write": "✍️",
+        "info": "•",
+    }
+    icon = icons.get(event.get("kind"), "•")
+    return f"{icon} {event.get('message', '')}"
+
+
+def _print_progress_event(event: dict) -> None:
+    """Print a progress event immediately."""
+    click.echo(_format_progress_event(event))
 
 
 @click.group()
@@ -50,19 +113,29 @@ def main():
 @click.option("--intensity", "-i", type=click.IntRange(1, 5), default=2,
               help="Research intensity (1=Quick, 2=Standard, 3=Thorough)")
 @click.option("--output", "-o", type=click.Path(), default=None,
-              help="Output file path (default: stdout)")
+              help="Explicit output file path (overrides auto-named save)")
+@click.option("--stdout", is_flag=True,
+              help="Also print the report to stdout")
+@click.option("--no-save", is_flag=True,
+              help="Do not save to file; print to stdout only")
 @click.option("--model", "-m", default=None,
               help="LLM model for researcher/writer (e.g., openai:gpt-4.1)")
 @click.option("--reviewer-model", "-r", default=None,
               help="LLM model for adversarial reviewer")
 @click.option("--max-revisions", type=int, default=3,
-              help="Max writer-reviewer revision cycles")
+               help="Max writer-reviewer revision cycles")
 @click.option("--no-review", is_flag=True,
-              help="Skip adversarial review")
-@click.option("--verbose", "-v", is_flag=True,
-              help="Show agent actions in real-time")
+               help="Skip adversarial review")
+@click.option("--quiet", is_flag=True,
+              help="Disable live progress indicators and use spinner-only output")
+@click.option("--verbose", is_flag=True, hidden=True)
+@click.option("-y", "--auto-approve", is_flag=True,
+              help="Auto-approve the research plan and execute immediately")
+@click.option("--hide-plan-on-autoapprove", is_flag=True,
+              help="Suppress plan output when --auto-approve is used")
 def research(query, intensity, output, model, reviewer_model, max_revisions,
-             no_review, verbose):
+             no_review, quiet, verbose, stdout, no_save, auto_approve,
+             hide_plan_on_autoapprove):
     """Run the full research pipeline."""
     if intensity > 3:
         click.echo("Levels 4-5 not yet implemented. Falling back to Level 3.", err=True)
@@ -92,20 +165,63 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
 
     plan_result = _spin(lambda: plan_graph.invoke(initial_state), message="Generating research plan...")
     plan = plan_result.get("research_plan", "No plan generated.")
-    _print_markdown(plan)
 
-    if not click.confirm("  Approve this plan and begin research?"):
-        click.echo("  Research cancelled.")
-        return
+    if not (auto_approve and hide_plan_on_autoapprove):
+        _print_markdown(plan)
+
+    if auto_approve:
+        click.echo()
+    else:
+        from ora.agents.supervisor import revise_plan_text
+
+        while True:
+            choice = click.prompt(
+                "\n  [A]pprove and run  [E]dit  [R]evise  [C]ancel",
+                type=click.Choice(["A", "E", "R", "C"], case_sensitive=False),
+                default="A",
+                show_choices=False,
+                show_default=False,
+            ).upper()
+
+            if choice == "A":
+                break
+            elif choice == "C":
+                click.echo("  Research cancelled.")
+                return
+            elif choice == "E":
+                edited = click.edit(text=plan, extension=".md")
+                if edited is None:
+                    click.echo("  Edit cancelled, plan unchanged.")
+                    continue
+                plan = plan_result["research_plan"] = edited.rstrip("\n") + "\n"
+                _print_markdown(plan)
+            elif choice == "R":
+                feedback = click.prompt("  Feedback for supervisor")
+                plan = plan_result["research_plan"] = _spin(
+                    lambda: revise_plan_text(query, intensity, plan, feedback),
+                    message="Revising plan...",
+                )
+                _print_markdown(plan)
 
     # Phase 2: Run research pipeline
     click.echo()
     research_graph = build_research_graph()
     plan_result["plan_approved"] = True
-    final_state = _spin(lambda: research_graph.invoke(plan_result), message="Researching...")
+    if quiet:
+        final_state = _spin(lambda: research_graph.invoke(plan_result), message="Researching...")
+    else:
+        final_state = research_graph.invoke(
+            plan_result,
+            {"configurable": {"progress_callback": _print_progress_event}},
+        )
 
-    sources_count = len(final_state.get("sources", []) or [])
-    findings_count = len(final_state.get("findings", []) or [])
+    if no_review:
+        click.echo("  Note: --no-review is currently ignored because the reviewer is disabled.", err=True)
+    if max_revisions != 3:
+        click.echo("  Note: --max-revisions is currently ignored because the reviewer is disabled.", err=True)
+
+    sources_count = len(final_state.get("sources") or [])
+    findings_count = len(final_state.get("findings") or [])
     draft_len = len(final_state.get("draft_report") or "")
     click.echo(f"  Sources: {sources_count} | Findings: {findings_count} | Draft: {draft_len} chars")
 
@@ -113,14 +229,20 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         click.echo("  ⚠️  No report was generated. Check your Firecrawl and API key configuration.", err=True)
         return
 
-    # Skip revision loop for now (reviewer disabled)
+    # Reviewer is disabled in the current graph, so use the draft as-is.
     draft = final_state.get("draft_report", "No report generated.")
 
-    if output:
-        with open(output, "w") as f:
+    # Determine output path
+    save_path = output or (None if no_save else _auto_filename(query))
+
+    # Save to file if a path was determined
+    if save_path:
+        with open(save_path, "w") as f:
             f.write(draft)
-        click.echo(f"Report saved to {output}")
-    else:
+        click.echo(f"Report saved to {save_path}")
+
+    # Print to stdout if requested (or if no-save with no output path)
+    if stdout or no_save:
         click.echo()
         _print_markdown(draft)
 
@@ -130,6 +252,10 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
 @click.option("--intensity", "-i", type=click.IntRange(1, 5), default=2)
 def plan(query, intensity):
     """Generate a research plan without executing research."""
+    if intensity > 3:
+        click.echo("Levels 4-5 not yet implemented. Falling back to Level 3.", err=True)
+        intensity = 3
+
     from ora.graph import build_plan_graph
     graph = build_plan_graph()
 
@@ -150,7 +276,7 @@ def config(show, init):
 
     if init:
         if os.path.exists(config_path):
-            if not click.confirm(f"Config already exists at {config_path}. Overwrite?"):
+            if not click.confirm(f"Config already exists at {config_path}. Overwrite?", prompt_suffix=" [y/n]: "):
                 click.echo("Aborted.")
                 return
         os.makedirs(os.path.dirname(config_path), exist_ok=True)

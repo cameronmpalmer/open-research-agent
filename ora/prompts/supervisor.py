@@ -13,6 +13,19 @@ Create a research plan with:
 
 Output the plan in clear markdown."""
 
+SUPERVISOR_REVISE_PROMPT = """You are a research planner. A user has reviewed your research plan and provided feedback. Revise the plan based on their feedback while preserving the overall structure.
+
+Original query: {query}
+Intensity level: {intensity} (1=Quick, 2=Standard, 3=Thorough)
+
+Current plan:
+{plan}
+
+User feedback:
+{feedback}
+
+Output the revised plan in clear markdown."""
+
 SUPERVISOR_ROUTE_PROMPT = """You are a research supervisor. Based on the current state, decide which agent should work next.
 
 Current state:

@@ -1,9 +1,10 @@
 """Writer agent node for LangGraph."""
-from typing import Any
+from typing import Any, Optional
 from langchain_core.runnables import RunnableConfig
 from ora.state import ResearchState
 from ora.prompts import WRITER_PROMPT
 from ora.config import load_config, get_researcher_model, get_llm
+from ora.progress import emit_progress
 
 
 def _format_findings_for_prompt(findings: list) -> str:
@@ -29,7 +30,7 @@ def _format_findings_for_prompt(findings: list) -> str:
 
 
 def writer_node(
-    state: ResearchState, config: RunnableConfig = None
+    state: ResearchState, config: Optional[RunnableConfig] = None
 ) -> dict[str, Any]:
     """Writer LangGraph node. Synthesizes findings into a structured report."""
     settings = load_config()
@@ -38,6 +39,12 @@ def writer_node(
     llm = get_llm(model_name, temperature=0.3)
 
     findings_raw = state.get("findings", [])
+    finding_label = "finding" if len(findings_raw) == 1 else "findings"
+    emit_progress(
+        config,
+        f"Writer: synthesizing report from {len(findings_raw)} {finding_label}",
+        kind="write",
+    )
     findings_text = _format_findings_for_prompt(findings_raw)
 
     prompt_text = WRITER_PROMPT.format(
@@ -46,8 +53,14 @@ def writer_node(
         findings=findings_text,
     )
 
-    response = llm.invoke(prompt_text)
+    try:
+        response = llm.invoke(prompt_text)
+    except Exception as e:
+        emit_progress(config, f"Writer: LLM call failed: {e}", kind="error")
+        raise
     draft_report = response.content if hasattr(response, 'content') else str(response)
+
+    emit_progress(config, f"Writer: draft generated, {len(draft_report)} chars", kind="success")
 
     return {
         "draft_report": draft_report,
