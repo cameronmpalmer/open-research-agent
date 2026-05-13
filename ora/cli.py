@@ -111,7 +111,7 @@ def main():
 @main.command()
 @click.argument("query")
 @click.option("--intensity", "-i", type=click.IntRange(1, 5), default=2,
-              help="Research intensity (1=Quick, 2=Standard, 3=Thorough)")
+              help="Research intensity (1=Quick, 2=Standard, 3=Thorough, 4=Deep, 5=Exhaustive)")
 @click.option("--output", "-o", type=click.Path(), default=None,
               help="Explicit output file path (overrides auto-named save)")
 @click.option("--stdout", is_flag=True,
@@ -137,10 +137,6 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
              no_review, quiet, verbose, stdout, no_save, auto_approve,
              hide_plan_on_autoapprove):
     """Run the full research pipeline."""
-    if intensity > 3:
-        click.echo("Levels 4-5 not yet implemented. Falling back to Level 3.", err=True)
-        intensity = 3
-
     click.echo(f"ORA Research: {query}")
     settings = load_config()
     researcher_model_name = model or settings.models.researcher or settings.models.default
@@ -205,7 +201,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
 
     # Phase 2: Run research pipeline
     click.echo()
-    research_graph = build_research_graph()
+    research_graph = build_research_graph(intensity=intensity)
     plan_result["plan_approved"] = True
     if quiet:
         final_state = _spin(lambda: research_graph.invoke(plan_result), message="Researching...")
@@ -215,10 +211,11 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
             {"configurable": {"progress_callback": _print_progress_event}},
         )
 
-    if no_review:
-        click.echo("  Note: --no-review is currently ignored because the reviewer is disabled.", err=True)
-    if max_revisions != 3:
-        click.echo("  Note: --max-revisions is currently ignored because the reviewer is disabled.", err=True)
+    if intensity < 4:
+        if no_review:
+            click.echo("  Note: --no-review is only relevant for intensity 4+.", err=True)
+        if max_revisions != 3:
+            click.echo("  Note: --max-revisions is only relevant for intensity 4+.", err=True)
 
     sources_count = len(final_state.get("sources") or [])
     findings_count = len(final_state.get("findings") or [])
@@ -229,8 +226,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         click.echo("  ⚠️  No report was generated. Check your Firecrawl and API key configuration.", err=True)
         return
 
-    # Reviewer is disabled in the current graph, so use the draft as-is.
-    draft = final_state.get("draft_report", "No report generated.")
+    draft = final_state.get("final_report") or final_state.get("draft_report", "No report generated.")
 
     # Determine output path
     save_path = output or (None if no_save else _auto_filename(query))
@@ -249,12 +245,10 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
 
 @main.command()
 @click.argument("query")
-@click.option("--intensity", "-i", type=click.IntRange(1, 5), default=2)
+@click.option("--intensity", "-i", type=click.IntRange(1, 5), default=2,
+              help="Research intensity (1=Quick, 2=Standard, 3=Thorough, 4=Deep, 5=Exhaustive)")
 def plan(query, intensity):
     """Generate a research plan without executing research."""
-    if intensity > 3:
-        click.echo("Levels 4-5 not yet implemented. Falling back to Level 3.", err=True)
-        intensity = 3
 
     from ora.graph import build_plan_graph
     graph = build_plan_graph()

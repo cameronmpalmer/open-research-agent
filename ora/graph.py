@@ -25,8 +25,12 @@ def build_plan_graph() -> StateGraph:
     return workflow.compile()
 
 
-def build_research_graph() -> StateGraph:
-    """Build the research graph (researcher -> writer). No reviewer for now."""
+def build_research_graph(intensity: int = 2) -> StateGraph:
+    """Build the research graph.
+
+    For intensity >= 4, includes the adversarial reviewer node for
+    multi-round revision. For lower intensities, researcher -> writer only.
+    """
     workflow = StateGraph(ResearchState)
 
     workflow.add_node("researcher", researcher_node)
@@ -34,13 +38,25 @@ def build_research_graph() -> StateGraph:
 
     workflow.set_entry_point("researcher")
 
+    if intensity >= 4:
+        workflow.add_node("reviewer", reviewer_node)
+        workflow.add_conditional_edges(
+            "writer", route_after_writer,
+            {"reviewer": "reviewer", "__end__": END},
+        )
+        workflow.add_conditional_edges(
+            "reviewer", route_after_reviewer,
+            {"researcher": "researcher", "__end__": END},
+        )
+    else:
+        workflow.add_conditional_edges(
+            "writer", route_after_writer,
+            {"reviewer": END, "__end__": END},
+        )
+
     workflow.add_conditional_edges(
         "researcher", route_after_researcher,
         {"writer": "writer", "__end__": END},
-    )
-    workflow.add_conditional_edges(
-        "writer", route_after_writer,
-        {"reviewer": END, "__end__": END},
     )
 
     return workflow.compile()

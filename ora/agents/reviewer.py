@@ -68,5 +68,6 @@ def reviewer_node(
     return {
         "review_verdict": verdict,
         "review_verdict_raw": output,
+        "revision_count": state.get("revision_count", 0) + 1,
         "messages": [output],
     }

@@ -3,7 +3,7 @@
 SUPERVISOR_PLAN_PROMPT = """You are a research planner. Your job is to create a research plan for the following query.
 
 Query: {query}
-Intensity level: {intensity} (1=Quick, 2=Standard, 3=Thorough)
+Intensity level: {intensity} (1=Quick, 2=Standard, 3=Thorough, 4=Deep, 5=Exhaustive)
 
 Create a research plan with:
 1. Core question restated
@@ -16,7 +16,7 @@ Output the plan in clear markdown."""
 SUPERVISOR_REVISE_PROMPT = """You are a research planner. A user has reviewed your research plan and provided feedback. Revise the plan based on their feedback while preserving the overall structure.
 
 Original query: {query}
-Intensity level: {intensity} (1=Quick, 2=Standard, 3=Thorough)
+Intensity level: {intensity} (1=Quick, 2=Standard, 3=Thorough, 4=Deep, 5=Exhaustive)
 
 Current plan:
 {plan}

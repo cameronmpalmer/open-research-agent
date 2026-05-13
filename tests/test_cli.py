@@ -60,7 +60,7 @@ class TestCLI:
         result = runner.invoke(main, ["plan", "--help"])
         assert result.exit_code == 0
 
-    def test_plan_intensity_above_3_falls_back(self, monkeypatch):
+    def test_plan_intensity_5_passes_through(self, monkeypatch):
         from ora import cli as cli_module
 
         received_states = []
@@ -79,8 +79,7 @@ class TestCLI:
         result = runner.invoke(main, ["plan", "Rust vs Go", "--intensity", "5"])
 
         assert result.exit_code == 0
-        assert "Falling back to Level 3" in result.output
-        assert received_states and received_states[0]["intensity"] == 3
+        assert received_states and received_states[0]["intensity"] == 5
 
     def test_config_help(self):
         runner = CliRunner()
@@ -115,7 +114,7 @@ class TestCLI:
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
         monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "A")
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
-        monkeypatch.setattr("ora.graph.build_research_graph", lambda: FakeResearchGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
         result = runner.invoke(main, ["research", "Rust vs Go"])
@@ -144,7 +143,7 @@ class TestCLI:
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
         monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "A")
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
-        monkeypatch.setattr("ora.graph.build_research_graph", lambda: FakeResearchGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
         result = runner.invoke(main, ["research", "Rust vs Go", "--quiet"])
@@ -168,14 +167,14 @@ class TestCLI:
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
         monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "A")
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
-        monkeypatch.setattr("ora.graph.build_research_graph", lambda: FakeResearchGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
         result = runner.invoke(main, ["research", "Rust vs Go", "--no-review", "--max-revisions", "7"])
 
         assert result.exit_code == 0
-        assert "--no-review is currently ignored" in result.output
-        assert "--max-revisions is currently ignored" in result.output
+        assert "--no-review is only relevant for intensity 4+" in result.output
+        assert "--max-revisions is only relevant for intensity 4+" in result.output
 
     def test_research_edit_path_modifies_plan(self, monkeypatch):
         from ora import cli as cli_module
@@ -202,7 +201,7 @@ class TestCLI:
         monkeypatch.setattr(cli_module.click, "prompt", _fake_prompt)
         monkeypatch.setattr(cli_module.click, "edit", lambda text=None, extension=None: "# Edited\n\n## New Section\n\nedited content\n")
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
-        monkeypatch.setattr("ora.graph.build_research_graph", lambda: FakeResearchGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
         result = runner.invoke(main, ["research", "Rust vs Go"])
@@ -244,7 +243,7 @@ class TestCLI:
         monkeypatch.setattr(cli_module.click, "prompt", _fake_prompt)
         monkeypatch.setattr(supervisor_module, "revise_plan_text", _fake_revise)
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
-        monkeypatch.setattr("ora.graph.build_research_graph", lambda: FakeResearchGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
         result = runner.invoke(main, ["research", "Rust vs Go"])
@@ -272,7 +271,7 @@ class TestCLI:
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
         monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "C")
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
-        monkeypatch.setattr("ora.graph.build_research_graph", lambda: FakeResearchGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
         result = runner.invoke(main, ["research", "Rust vs Go"])
@@ -298,7 +297,7 @@ class TestCLI:
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
         monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: prompt_called.append(1) or "A")
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
-        monkeypatch.setattr("ora.graph.build_research_graph", lambda: FakeResearchGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
         result = runner.invoke(main, ["research", "Rust vs Go", "-y"])
@@ -323,7 +322,7 @@ class TestCLI:
         monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: plan_rendered.append(text))
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
-        monkeypatch.setattr("ora.graph.build_research_graph", lambda: FakeResearchGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
         result = runner.invoke(main, ["research", "Rust vs Go", "-y", "--hide-plan-on-autoapprove"])
