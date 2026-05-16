@@ -1,4 +1,7 @@
 """Tests for CLI interface."""
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -47,6 +50,20 @@ class TestCLI:
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
         assert "research" in result.output
+
+    def test_python_module_entrypoint_help(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "-m", "ora", "--help"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "Open Research Agent" in result.stdout
+        assert "research" in result.stdout
 
     def test_top_level_help_lists_only_public_commands(self):
         runner = CliRunner()
