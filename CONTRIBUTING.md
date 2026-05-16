@@ -24,7 +24,7 @@ export FIRECRAWL_API_KEY="your-firecrawl-api-key"
 You can create a local config file with:
 
 ```bash
-ora config --init
+open-research-agent config --init
 ```
 
 ## Run tests
@@ -42,19 +42,20 @@ python3 -m pytest tests/test_cli.py -q
 ## Run the CLI locally
 
 ```bash
+open-research-agent --help
 ora --help
 python -m ora --help
-ora config --show
+open-research-agent config --show
 ```
 
 ## Generated reports
 
-`ora research` can generate timestamped markdown reports in the repository root or current working directory. Do not commit generated research reports.
+`open-research-agent research` can generate timestamped markdown reports in the repository root or current working directory. Do not commit generated research reports.
 
 Use `--no-save` while testing if you do not need a report file:
 
 ```bash
-ora research "AI memory systems" --no-save
+open-research-agent research "AI memory systems" --no-save
 ```
 
 ## Secrets

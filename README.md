@@ -27,8 +27,10 @@ The default model names are `deepseek-v4-flash` for research and writing, and `d
 Install from PyPI:
 
 ```bash
-pip install ora
+pip install open-research-agent
 ```
+
+The primary CLI command is `open-research-agent`. The shorter `ora` command is also installed as a convenience alias.
 
 Install from source for development:
 
@@ -52,13 +54,13 @@ export FIRECRAWL_API_KEY="your-firecrawl-api-key"
 Create a default config file:
 
 ```bash
-ora config --init
+open-research-agent config --init
 ```
 
 Show the active configuration and intensity levels:
 
 ```bash
-ora config --show
+open-research-agent config --show
 ```
 
 The config file is stored at:
@@ -72,31 +74,31 @@ The config file is stored at:
 Preview a research plan without running the full pipeline:
 
 ```bash
-ora plan "What are the tradeoffs between Rust and Go for backend services?"
+open-research-agent plan "What are the tradeoffs between Rust and Go for backend services?"
 ```
 
 Run a standard research task:
 
 ```bash
-ora research "What are the tradeoffs between Rust and Go for backend services?" --intensity 2
+open-research-agent research "What are the tradeoffs between Rust and Go for backend services?" --intensity 2
 ```
 
 Run deeper research with adversarial review:
 
 ```bash
-ora research "What are the tradeoffs between Rust and Go for backend services?" --intensity 4
+open-research-agent research "What are the tradeoffs between Rust and Go for backend services?" --intensity 4
 ```
 
 Save to an explicit file:
 
 ```bash
-ora research "AI memory systems" --output ai-memory-systems.md
+open-research-agent research "AI memory systems" --output ai-memory-systems.md
 ```
 
 Print only to stdout and do not save a report file:
 
 ```bash
-ora research "AI memory systems" --no-save
+open-research-agent research "AI memory systems" --no-save
 ```
 
 ## Intensity levels
@@ -115,7 +117,7 @@ Levels 4 and 5 use the adversarial reviewer by default.
 
 ## Output files
 
-By default, `ora research` saves a timestamped markdown report in the current directory. Generated research reports are local outputs and should not be committed to the repository.
+By default, `open-research-agent research` saves a timestamped markdown report in the current directory. Generated research reports are local outputs and should not be committed to the repository.
 
 Use `--output` to choose a specific path, or `--no-save` to print the report without writing a file.
 
@@ -136,6 +138,7 @@ pytest
 Run the CLI locally:
 
 ```bash
+open-research-agent --help
 ora --help
 python -m ora --help
 ```

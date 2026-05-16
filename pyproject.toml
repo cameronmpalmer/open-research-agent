@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ora"
+name = "open-research-agent"
 version = "0.1.0"
 description = "Open Research Agent - multi-agent research with adversarial review"
 readme = "README.md"
@@ -48,6 +48,7 @@ dev = [
 ]
 
 [project.scripts]
+open-research-agent = "ora.cli:main"
 ora = "ora.cli:main"
 
 [tool.hatch.build.targets.wheel]

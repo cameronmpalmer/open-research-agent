@@ -14,3 +14,6 @@ htmlcov/
 
 # Generated ORA research reports
 *-20??-??-??-??????.md
+
+# Internal development documentation
+docs/
