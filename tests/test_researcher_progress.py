@@ -131,6 +131,37 @@ def test_researcher_handles_scrape_error_and_continues(monkeypatch):
     assert any("scrape failed" in message for message in messages)
 
 
+def test_researcher_deduplicates_repeated_source_urls(monkeypatch):
+    events = []
+
+    monkeypatch.setattr(
+        "ora.tools.search.web_search",
+        FakeTool("1. [Example](https://example.com/article)\n   snippet"),
+    )
+    monkeypatch.setattr(
+        "ora.tools.scrape.scrape_page",
+        FakeTool("This is scraped content about Rust vs Go."),
+    )
+    monkeypatch.setattr(
+        "ora.tools.evaluate.evaluate_source",
+        lambda url, content, source_type: Source(
+            url=url, title="Example", source_type=source_type
+        ),
+    )
+
+    result = researcher_node(
+        {"query": "Rust vs Go", "intensity": 1},
+        {"configurable": {"progress_callback": events.append}},
+    )
+
+    urls = [source.url for source in result["sources"]]
+    assert urls == ["https://example.com/article"]
+    assert result["research_status"] == "interim"
+
+    messages = [event["message"] for event in events]
+    assert any("skipping duplicate" in message for message in messages)
+
+
 def test_researcher_handles_search_failure(monkeypatch):
     events = []
 

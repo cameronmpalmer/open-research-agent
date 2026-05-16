@@ -1,5 +1,5 @@
 """Tests for researcher agent."""
-from ora.agents.researcher import generate_search_queries
+from ora.agents.researcher import generate_search_queries, _normalize_url_for_dedupe
 
 
 class TestGenerateSearchQueries:
@@ -18,3 +18,15 @@ class TestGenerateSearchQueries:
     def test_query_included_in_generated_queries(self):
         queries = generate_search_queries("AI safety", intensity=2)
         assert any("AI safety" in q for q in queries)
+
+
+class TestNormalizeUrlForDedupe:
+    def test_normalizes_http_and_https_to_same_key(self):
+        assert _normalize_url_for_dedupe(
+            "http://example.com/article"
+        ) == _normalize_url_for_dedupe("https://example.com/article")
+
+    def test_ignores_fragments_and_trailing_slashes(self):
+        assert _normalize_url_for_dedupe(
+            "https://example.com/article/#section"
+        ) == _normalize_url_for_dedupe("https://example.com/article")

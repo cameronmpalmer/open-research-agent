@@ -10,15 +10,15 @@ class TestLevelParams:
     def test_level_1_params(self):
         p = LEVEL_PARAMS[1]
         assert p["min_sources"] == 3
-        assert p["max_rounds"] == 1
-        assert p["urls_per_query"] == 3
-        assert p["scrapes_per_query"] == 2
+        assert p["max_rounds"] == 5
+        assert p["urls_per_query"] == 5
+        assert p["scrapes_per_query"] == 3
         assert p["max_content_chars"] == 8000
 
     def test_level_4_params(self):
         p = LEVEL_PARAMS[4]
         assert p["min_sources"] == 50
-        assert p["max_rounds"] == 3
+        assert p["max_rounds"] == 10
         assert p["urls_per_query"] == 8
         assert p["scrapes_per_query"] == 4
         assert p["max_content_chars"] == 12000
@@ -26,7 +26,7 @@ class TestLevelParams:
     def test_level_5_params(self):
         p = LEVEL_PARAMS[5]
         assert p["min_sources"] == 100
-        assert p["max_rounds"] == 4
+        assert p["max_rounds"] == 10
         assert p["urls_per_query"] == 10
         assert p["scrapes_per_query"] == 5
         assert p["max_content_chars"] == 16000

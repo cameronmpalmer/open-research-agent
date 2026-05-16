@@ -28,7 +28,7 @@ def build_plan_graph() -> StateGraph:
 def build_research_graph(intensity: int = 2) -> StateGraph:
     """Build the research graph.
 
-    For intensity >= 4, includes the adversarial reviewer node for
+    For intensity >= 3, includes the adversarial reviewer node for
     multi-round revision. For lower intensities, researcher -> writer only.
     """
     workflow = StateGraph(ResearchState)
@@ -38,7 +38,7 @@ def build_research_graph(intensity: int = 2) -> StateGraph:
 
     workflow.set_entry_point("researcher")
 
-    if intensity >= 4:
+    if intensity >= 3:
         workflow.add_node("reviewer", reviewer_node)
         workflow.add_conditional_edges(
             "writer", route_after_writer,

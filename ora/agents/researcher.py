@@ -29,11 +29,12 @@ SKIP_DOMAINS = frozenset({
 
 
 LEVEL_PARAMS = {
-    1: {"min_sources": 3, "max_rounds": 1, "urls_per_query": 3, "scrapes_per_query": 2, "max_content_chars": 8000},
-    2: {"min_sources": 8, "max_rounds": 1, "urls_per_query": 3, "scrapes_per_query": 2, "max_content_chars": 8000},
-    3: {"min_sources": 15, "max_rounds": 2, "urls_per_query": 5, "scrapes_per_query": 3, "max_content_chars": 10000},
-    4: {"min_sources": 50, "max_rounds": 3, "urls_per_query": 8, "scrapes_per_query": 4, "max_content_chars": 12000},
-    5: {"min_sources": 100, "max_rounds": 4, "urls_per_query": 10, "scrapes_per_query": 5, "max_content_chars": 16000},
+    # max_rounds is a safety cap; the loop stops earlier when min_sources is reached.
+    1: {"min_sources": 3,  "max_rounds": 5,  "urls_per_query": 5, "scrapes_per_query": 3, "max_content_chars": 8000},
+    2: {"min_sources": 8,  "max_rounds": 5,  "urls_per_query": 5, "scrapes_per_query": 3, "max_content_chars": 8000},
+    3: {"min_sources": 15, "max_rounds": 7,  "urls_per_query": 5, "scrapes_per_query": 3, "max_content_chars": 10000},
+    4: {"min_sources": 50, "max_rounds": 10, "urls_per_query": 8, "scrapes_per_query": 4, "max_content_chars": 12000},
+    5: {"min_sources": 100,"max_rounds": 10, "urls_per_query": 10,"scrapes_per_query": 5, "max_content_chars": 16000},
 }
 
 
@@ -44,6 +45,24 @@ def _should_skip_url(url: str) -> bool:
     except Exception:
         return False
     return domain in SKIP_DOMAINS
+
+
+def _normalize_url_for_dedupe(url: str) -> str:
+    """Normalize URL enough to avoid duplicate source entries."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return url.rstrip("/")
+
+    path = parsed.path.rstrip("/")
+    scheme = "https" if parsed.scheme.lower() in {"http", "https"} else parsed.scheme.lower()
+    normalized = parsed._replace(
+        scheme=scheme,
+        netloc=parsed.netloc.lower(),
+        path=path,
+        fragment="",
+    )
+    return normalized.geturl()
 
 
 def generate_search_queries(query: str, intensity: int) -> list[str]:
@@ -130,48 +149,148 @@ def generate_gap_queries(query: str, intensity: int) -> list[str]:
     return [t.format(query=query) for t in templates]
 
 
+def _scrape_and_collect(
+    urls: list[str],
+    params: dict,
+    max_content_chars: int,
+    config: Optional[RunnableConfig],
+    log: list[str],
+    sources: list,
+    findings: list,
+    seen_urls: set[str],
+    *_,
+    min_sources: int,
+) -> bool:
+    """Scrape URLs up to the per-query cap, appending to sources/findings.
+
+    Returns True if we've hit the overall min_sources target and the caller
+    should stop further work.
+    """
+    from ora.tools.scrape import scrape_page
+    from ora.tools.evaluate import evaluate_source
+
+    scraped_this_query = 0
+    for url in urls[:params["urls_per_query"]]:
+        if len(sources) >= min_sources:
+            return True
+
+        normalized_url = _normalize_url_for_dedupe(url)
+        if normalized_url in seen_urls:
+            display_url = url.replace("https://", "").replace("http://", "")[:80]
+            log.append(f"  Skipping duplicate source URL: {url[:80]}")
+            emit_progress(config, f"Researcher: skipping duplicate {display_url}", kind="info")
+            continue
+
+        if _should_skip_url(url):
+            display_url = url.replace("https://", "").replace("http://", "")[:80]
+            log.append(f"  Skipping known-hostile domain: {url[:80]}")
+            emit_progress(config, f"Researcher: skipping {display_url} (hostile domain)", kind="info")
+            continue
+
+        display_url = url.replace("https://", "").replace("http://", "")[:80]
+        emit_progress(config, f"Researcher: scraping {display_url}", kind="scrape")
+        c = scrape_page.invoke({"url": url})
+        is_error = (
+            c.startswith("Scrape error") or
+            c.startswith("Scrape failed") or
+            c.startswith("No content extracted")
+        )
+        log.append(f"  Scraped: {len(c)} chars from {url[:60]} {'(FAIL)' if is_error else ''}")
+        if is_error:
+            emit_progress(config, f"Researcher: scrape failed for {display_url}", kind="error")
+            continue
+
+        emit_progress(config, f"Researcher: scraped {len(c)} chars from {display_url}", kind="success")
+
+        c = c[:max_content_chars]
+
+        try:
+            source = evaluate_source(url=url, content=c, source_type="unknown")
+        except Exception as e:
+            log.append(f"  Source eval failed from {url[:60]}: {e}")
+            emit_progress(config, f"Researcher: source evaluation failed for {display_url}", kind="error")
+            source = Source(
+                url=url,
+                title="",
+                source_type="unknown",
+                overall_reliability="Low",
+                notes=f"Source evaluation failed: {e}",
+            )
+        else:
+            emit_progress(config, "Researcher: evaluated source reliability", kind="info")
+
+        finding_confidence = {
+            "High": "High",
+            "Medium": "Moderate",
+            "Low": "Low",
+        }.get(source.overall_reliability, "Unknown")
+        sources.append(source)
+        seen_urls.add(normalized_url)
+        findings.append(
+            Finding(
+                claim=c[:500],
+                confidence=finding_confidence,  # type: ignore[arg-type]
+                supporting_sources=[url],
+            )
+        )
+        scraped_this_query += 1
+        if scraped_this_query >= params["scrapes_per_query"]:
+            break
+
+    return len(sources) >= min_sources
+
+
 def researcher_node(
     state: ResearchState, config: Optional[RunnableConfig] = None
 ) -> dict[str, Any]:
-    """Researcher: template-based queries, programmatic search/scrape.
-    
+    """Researcher: iterate until min_sources target is reached.
+
     Synchronous node -- uses blocking HTTP calls inside LangGraph's sync execution.
-    Uses multi-round loop with gap-targeted queries for higher intensity levels.
+    Per-query caps prevent one search angle from flooding results, but the overall
+    loop continues generating queries and scraping until min_sources is hit (or the
+    safety max_rounds cap is exceeded).
     """
     settings = load_config()
 
     query = state.get("query", "")
     intensity = state.get("intensity", 2)
     params = LEVEL_PARAMS.get(intensity, LEVEL_PARAMS[2])
+    min_sources = params["min_sources"]
+    max_rounds = params["max_rounds"]
     max_content_chars = params["max_content_chars"]
 
     from ora.tools.search import web_search
-    from ora.tools.scrape import scrape_page
-    from ora.tools.evaluate import evaluate_source
 
-    sources = list(state.get("sources")) if state.get("sources") else []
-    findings = list(state.get("findings")) if state.get("findings") else []
-    prior_source_count = len(sources)
+    sources: list = list(state.get("sources")) if state.get("sources") else []
+    findings: list = list(state.get("findings")) if state.get("findings") else []
+    seen_urls = {
+        _normalize_url_for_dedupe(source.url)
+        for source in sources
+        if hasattr(source, "url")
+    }
     log: list[str] = []
     all_queries: list[str] = []
-    queries_for_round: list[str] = list(generate_search_queries(query, intensity))
+    round_num = 0
 
-    for round_num in range(1, params["max_rounds"] + 1):
+    while len(sources) < min_sources and round_num < max_rounds:
+        round_num += 1
         emit_progress(
             config,
-            f"Researcher: round {round_num}/{params['max_rounds']}",
+            f"Researcher: round {round_num} (have {len(sources)}, need {min_sources})",
             kind="info",
         )
 
-        # Use gap queries for rounds beyond the first
-        if round_num > 1:
-            queries_for_round = generate_gap_queries(query, intensity)
+        if round_num == 1:
+            queries_for_round = list(generate_search_queries(query, intensity))
+        else:
+            queries_for_round = list(generate_gap_queries(query, intensity))
 
         if not queries_for_round:
-            continue
+            emit_progress(config, "Researcher: no more queries to try", kind="info")
+            break
 
-        query_label = "query" if len(queries_for_round) == 1 else "queries"
         kind_label = "search" if round_num == 1 else "gap"
+        query_label = "query" if len(queries_for_round) == 1 else "queries"
         emit_progress(
             config,
             f"Researcher: generated {len(queries_for_round)} {kind_label} {query_label}",
@@ -179,6 +298,9 @@ def researcher_node(
         )
 
         for q in queries_for_round:
+            if len(sources) >= min_sources:
+                break
+
             all_queries.append(q)
             log.append(f"Search: {q}")
             emit_progress(config, f'Researcher: searching "{q}"', kind="search")
@@ -197,66 +319,11 @@ def researcher_node(
                 kind="info" if search_failed else "success",
             )
 
-            scraped_count = 0
-            for url in urls[:params["urls_per_query"]]:
-                if _should_skip_url(url):
-                    display_url = url.replace("https://", "").replace("http://", "")[:80]
-                    log.append(f"  Skipping known-hostile domain: {url[:80]}")
-                    emit_progress(config, f"Researcher: skipping {display_url} (hostile domain)", kind="info")
-                    continue
-
-                display_url = url.replace("https://", "").replace("http://", "")[:80]
-                emit_progress(config, f"Researcher: scraping {display_url}", kind="scrape")
-                c = scrape_page.invoke({"url": url})
-                is_error = (
-                    c.startswith("Scrape error") or
-                    c.startswith("Scrape failed") or
-                    c.startswith("No content extracted")
-                )
-                log.append(f"  Scraped: {len(c)} chars from {url[:60]} {'(FAIL)' if is_error else ''}")
-                if is_error:
-                    emit_progress(config, f"Researcher: scrape failed for {display_url}", kind="error")
-                    continue
-
-                emit_progress(config, f"Researcher: scraped {len(c)} chars from {display_url}", kind="success")
-
-                # Truncate content to per-level limit
-                c = c[:max_content_chars]
-
-                try:
-                    source = evaluate_source(url=url, content=c, source_type="unknown")
-                except Exception as e:
-                    log.append(f"  Source eval failed from {url[:60]}: {e}")
-                    emit_progress(config, f"Researcher: source evaluation failed for {display_url}", kind="error")
-                    source = Source(
-                        url=url,
-                        title="",
-                        source_type="unknown",
-                        overall_reliability="Low",
-                        notes=f"Source evaluation failed: {e}",
-                    )
-                else:
-                    emit_progress(config, "Researcher: evaluated source reliability", kind="info")
-                finding_confidence = {
-                    "High": "High",
-                    "Medium": "Moderate",
-                    "Low": "Low",
-                }.get(source.overall_reliability, "Unknown")
-                sources.append(source)
-                findings.append(
-                    Finding(
-                        claim=c[:500],
-                        confidence=finding_confidence,  # type: ignore[arg-type]
-                        supporting_sources=[url],
-                    )
-                )
-                scraped_count += 1
-                if scraped_count >= params["scrapes_per_query"]:
-                    break
-
-        # Check if we have enough sources to stop early
-        if len(sources) >= params["min_sources"]:
-            break
+            if _scrape_and_collect(
+                urls, params, max_content_chars, config, log,
+                sources, findings, seen_urls, min_sources=min_sources,
+            ):
+                break
 
     if not findings:
         results_text = web_search.invoke({"query": query})
@@ -265,7 +332,7 @@ def researcher_node(
             confidence="Unknown",
         ))
 
-    research_status = "final" if len(sources) >= params["min_sources"] else "interim"
+    research_status = "final" if len(sources) >= min_sources else "interim"
 
     source_label = "source" if len(sources) == 1 else "sources"
     finding_label = "finding" if len(findings) == 1 else "findings"

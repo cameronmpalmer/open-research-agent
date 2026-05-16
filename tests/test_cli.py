@@ -222,8 +222,8 @@ class TestCLI:
         result = runner.invoke(main, ["research", "Rust vs Go", "--no-review", "--max-revisions", "7"])
 
         assert result.exit_code == 0
-        assert "--no-review is only relevant for intensity 4+" in result.output
-        assert "--max-revisions is only relevant for intensity 4+" in result.output
+        assert "--no-review is only relevant for intensity 3+" in result.output
+        assert "--max-revisions is only relevant for intensity 3+" in result.output
 
     def test_research_edit_path_modifies_plan(self, monkeypatch):
         from ora import cli as cli_module

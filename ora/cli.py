@@ -174,7 +174,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
             choice = click.prompt(
                 "\n  [A]pprove and run  [E]dit  [R]evise  [C]ancel",
                 type=click.Choice(["A", "E", "R", "C"], case_sensitive=False),
-                default="A",
+                default=None,
                 show_choices=False,
                 show_default=False,
             ).upper()
@@ -211,11 +211,11 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
             {"configurable": {"progress_callback": _print_progress_event}},
         )
 
-    if intensity < 4:
+    if intensity < 3:
         if no_review:
-            click.echo("  Note: --no-review is only relevant for intensity 4+.", err=True)
+            click.echo("  Note: --no-review is only relevant for intensity 3+.", err=True)
         if max_revisions != 3:
-            click.echo("  Note: --max-revisions is only relevant for intensity 4+.", err=True)
+            click.echo("  Note: --max-revisions is only relevant for intensity 3+.", err=True)
 
     sources_count = len(final_state.get("sources") or [])
     findings_count = len(final_state.get("findings") or [])
@@ -303,15 +303,19 @@ def config(show, init):
     click.echo(f"Search backend: {settings.search.provider}")
     click.echo(f"Firecrawl URL: {settings.search.firecrawl_api_url}")
     click.echo(f"Max revisions: {settings.limits.max_revisions}")
+    click.echo()
 
+    from ora.agents.researcher import LEVEL_PARAMS
 
-@main.command()
-def bench():
-    """Show instructions for Deep Research Bench submission."""
-    click.echo("Deep Research Bench runner (v0)")
-    click.echo("  Clone: git clone https://github.com/Ayanami0730/deep_research_bench")
-    click.echo("  Then: python tests/run_evaluate.py")
-    click.echo("  See docs for full instructions.")
+    labels = {1: "Quick", 2: "Standard", 3: "Thorough", 4: "Deep", 5: "Exhaustive"}
+    reviewer_on = {3, 4, 5}
+    click.echo("Intensity Levels")
+    click.echo(f"{'Level':<6} {'Label':<12} {'Min Sources':<12} {'Max Rounds':<10} {'Reviewer':<9}")
+    click.echo(f"{'-----':<6} {'----------':<12} {'-----------':<12} {'----------':<10} {'--------':<9}")
+    for level in [1, 2, 3, 4, 5]:
+        p = LEVEL_PARAMS[level]
+        reviewer = "Yes" if level in reviewer_on else "No"
+        click.echo(f"{level:<6} {labels[level]:<12} {p['min_sources']:<12} {p['max_rounds']:<10} {reviewer:<9}")
 
 
 if __name__ == "__main__":
