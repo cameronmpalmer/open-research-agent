@@ -106,7 +106,7 @@ open-research-agent research "AI memory systems" --no-save
 ORA supports five research intensity levels:
 
 | Level | Label | Minimum sources | Max rounds (safety cap) | Reviewer |
-|---|---|---|---:|---:|---|
+|:---:|:---|---|---:|---:|:---:|
 | 1 | Quick | 3 | 5 | No |
 | 2 | Standard | 8 | 5 | No |
 | 3 | Thorough | 15 | 7 | Yes |
