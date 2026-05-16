@@ -50,8 +50,12 @@ def reviewer_node(
     researcher's intermediate findings or search queries. Uses a different
     model provider from the researcher to prevent correlated errors.
     """
+    from ora.progress import emit_progress
+
     settings = load_config()
     model_name = get_reviewer_model(settings)
+
+    emit_progress(config, "Reviewer: auditing draft report...", kind="review")
 
     llm = get_llm(model_name, temperature=0.2)
 
@@ -64,6 +68,16 @@ def reviewer_node(
     output = response.content if hasattr(response, 'content') else str(response)
 
     verdict = parse_reviewer_output(output)
+
+    v = verdict.verdict if hasattr(verdict, 'verdict') else "PASS"
+    if v == "REVISE":
+        emit_progress(
+            config,
+            "Reviewer: REVISE — restarting research to address gaps",
+            kind="warning",
+        )
+    else:
+        emit_progress(config, "Reviewer: PASS — report accepted", kind="success")
 
     return {
         "review_verdict": verdict,

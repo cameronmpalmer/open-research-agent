@@ -277,6 +277,8 @@ def researcher_node(
 
     sources: list = list(state.get("sources")) if state.get("sources") else []
     findings: list = list(state.get("findings")) if state.get("findings") else []
+    prior_source_count = len(sources)
+    prior_finding_count = len(findings)
     seen_urls = {
         _normalize_url_for_dedupe(source.url)
         for source in sources
@@ -359,8 +361,8 @@ def researcher_node(
 
     return {
         "search_queries": all_queries,
-        "sources": sources,
-        "findings": findings,
+        "sources": sources[prior_source_count:],
+        "findings": findings[prior_finding_count:],
         "research_status": research_status,
         "messages": ["\n".join(log)],
     }
