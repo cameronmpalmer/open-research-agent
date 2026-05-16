@@ -24,7 +24,7 @@ def test_researcher_emits_progress_events(monkeypatch):
     )
     monkeypatch.setattr(
         "ora.tools.evaluate.evaluate_source",
-        lambda url, content, source_type: Source(
+        lambda url, title, content, source_type: Source(
             url=url, title="Example", source_type=source_type
         ),
     )
@@ -144,7 +144,7 @@ def test_researcher_deduplicates_repeated_source_urls(monkeypatch):
     )
     monkeypatch.setattr(
         "ora.tools.evaluate.evaluate_source",
-        lambda url, content, source_type: Source(
+        lambda url, title, content, source_type: Source(
             url=url, title="Example", source_type=source_type
         ),
     )
@@ -160,6 +160,27 @@ def test_researcher_deduplicates_repeated_source_urls(monkeypatch):
 
     messages = [event["message"] for event in events]
     assert any("skipping duplicate" in message for message in messages)
+
+
+def test_researcher_uses_search_result_titles_for_sources(monkeypatch):
+    monkeypatch.setattr(
+        "ora.tools.search.web_search",
+        FakeTool("1. [Rust vs Go: Which One to Choose?](https://example.com/article)\n   snippet"),
+    )
+    monkeypatch.setattr(
+        "ora.tools.scrape.scrape_page",
+        FakeTool("This is scraped content about Rust vs Go."),
+    )
+    monkeypatch.setattr(
+        "ora.tools.evaluate.evaluate_source",
+        lambda url, title, content, source_type: Source(
+            url=url, title=title, source_type=source_type
+        ),
+    )
+
+    result = researcher_node({"query": "Rust vs Go", "intensity": 1})
+
+    assert result["sources"][0].title == "Rust vs Go: Which One to Choose?"
 
 
 def test_researcher_handles_search_failure(monkeypatch):
@@ -202,7 +223,7 @@ def test_researcher_skips_hostile_domains(monkeypatch):
     )
     monkeypatch.setattr(
         "ora.tools.evaluate.evaluate_source",
-        lambda url, content, source_type: Source(
+        lambda url, title, content, source_type: Source(
             url=url, title="Example", source_type=source_type
         ),
     )

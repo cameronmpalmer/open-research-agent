@@ -65,6 +65,14 @@ def _normalize_url_for_dedupe(url: str) -> str:
     return normalized.geturl()
 
 
+def _extract_search_result_titles(search_results: str) -> dict[str, str]:
+    """Extract URL -> title mappings from markdown-formatted search results."""
+    titles: dict[str, str] = {}
+    for title, url in re.findall(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', search_results):
+        titles[_normalize_url_for_dedupe(url)] = title.strip()
+    return titles
+
+
 def generate_search_queries(query: str, intensity: int) -> list[str]:
     """Generate search queries based on intensity level."""
     angles = {
@@ -158,6 +166,7 @@ def _scrape_and_collect(
     sources: list,
     findings: list,
     seen_urls: set[str],
+    url_titles: dict[str, str],
     *_,
     min_sources: int,
 ) -> bool:
@@ -205,7 +214,12 @@ def _scrape_and_collect(
         c = c[:max_content_chars]
 
         try:
-            source = evaluate_source(url=url, content=c, source_type="unknown")
+            source = evaluate_source(
+                url=url,
+                title=url_titles.get(normalized_url, ""),
+                content=c,
+                source_type="unknown",
+            )
         except Exception as e:
             log.append(f"  Source eval failed from {url[:60]}: {e}")
             emit_progress(config, f"Researcher: source evaluation failed for {display_url}", kind="error")
@@ -311,6 +325,7 @@ def researcher_node(
                 emit_progress(config, f'Researcher: search failed for "{q}"', kind="error")
 
             urls = re.findall(r'https?://[^\s<>"\')\]]+', r)
+            url_titles = _extract_search_result_titles(r)
             log.append(f"  URLs found: {len(urls)}")
             url_label = "URL" if len(urls) == 1 else "URLs"
             emit_progress(
@@ -321,7 +336,7 @@ def researcher_node(
 
             if _scrape_and_collect(
                 urls, params, max_content_chars, config, log,
-                sources, findings, seen_urls, min_sources=min_sources,
+                sources, findings, seen_urls, url_titles, min_sources=min_sources,
             ):
                 break
 
