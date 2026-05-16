@@ -11,7 +11,7 @@ ORA turns a research question into a sourced markdown report:
 1. A supervisor drafts a research plan.
 2. The researcher searches and scrapes web sources.
 3. The writer synthesizes findings into a report.
-4. For intensity levels 4 and 5, an adversarial reviewer audits the draft.
+4. For intensity levels 3 and above, an adversarial reviewer audits the draft.
 
 ## Current backend support
 
@@ -105,15 +105,30 @@ open-research-agent research "AI memory systems" --no-save
 
 ORA supports five research intensity levels:
 
-| Level | Label | Minimum sources | Max rounds | Reviewer |
-|---|---|---:|---:|---|
-| 1 | Quick | 3 | 1 | No |
-| 2 | Standard | 8 | 1 | No |
-| 3 | Thorough | 15 | 2 | No |
-| 4 | Deep | 50 | 3 | Yes |
-| 5 | Exhaustive | 100 | 4 | Yes |
+| Level | Label | Minimum sources | Max rounds (safety cap) | Reviewer |
+|---|---|---|---:|---:|---|
+| 1 | Quick | 3 | 5 | No |
+| 2 | Standard | 8 | 5 | No |
+| 3 | Thorough | 15 | 7 | Yes |
+| 4 | Deep | 50 | 10 | Yes |
+| 5 | Exhaustive | 100 | 10 | Yes |
 
-Levels 4 and 5 use the adversarial reviewer by default.
+Levels 3, 4, and 5 use the adversarial reviewer by default.
+
+## CLI flags
+
+| Flag | Description |
+|------|-------------|
+| `-i`, `--intensity 1-5` | Research intensity level (default: 2) |
+| `-o`, `--output PATH` | Save report to a specific path |
+| `--no-save` | Print to stdout without saving a file |
+| `--stdout` | Print to stdout (report is still saved) |
+| `-m`, `--model NAME` | Override the LLM model for research and writing |
+| `-r`, `--reviewer-model NAME` | Override the LLM model for planning and review |
+| `-y`, `--auto-approve` | Skip the interactive plan approval prompt |
+| `--no-review` | Disable adversarial reviewer (even at intensity 3+) |
+| `--max-revisions N` | Cap reviewer revision rounds (default: 3) |
+| `--quiet` | Suppress progress output, show only the final report |
 
 ## Output files
 
