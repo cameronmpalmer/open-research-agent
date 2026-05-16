@@ -48,6 +48,23 @@ class TestCLI:
         assert result.exit_code == 0
         assert "research" in result.output
 
+    def test_top_level_help_lists_only_public_commands(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+
+        assert result.exit_code == 0
+        assert "config" in result.output
+        assert "plan" in result.output
+        assert "research" in result.output
+        assert "bench" not in result.output
+
+    def test_bench_command_is_not_registered(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["bench"])
+
+        assert result.exit_code != 0
+        assert "No such command" in result.output
+
     def test_research_help(self):
         runner = CliRunner()
         result = runner.invoke(main, ["research", "--help"])
@@ -85,6 +102,21 @@ class TestCLI:
         runner = CliRunner()
         result = runner.invoke(main, ["config", "--help"])
         assert result.exit_code == 0
+
+    def test_config_show_includes_intensity_table(self, monkeypatch):
+        import ora.cli as cli_module
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr("os.path.exists", lambda path: True)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["config", "--show"])
+
+        assert result.exit_code == 0
+        assert "Intensity Levels" in result.output
+        assert "Quick" in result.output
+        assert "Deep" in result.output
+        assert "Exhaustive" in result.output
 
     def test_research_without_query_fails(self):
         runner = CliRunner()
