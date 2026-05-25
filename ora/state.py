@@ -68,6 +68,9 @@ class ResearchState(TypedDict, total=False):
 
     # Research
     search_queries: list[str]
+    # Accumulates across researcher invocations so queries are never repeated
+    # after a reviewer REVISE sends execution back to researcher.
+    executed_queries: Annotated[list[str], _list_reducer]
     sources: Annotated[list[Source], _list_reducer]
     findings: Annotated[list[Finding], _list_reducer]
 
