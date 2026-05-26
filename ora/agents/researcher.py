@@ -180,6 +180,11 @@ def _format_reviewer_feedback(state: ResearchState) -> str:
         parts.append(
             "SUGGESTED improvements:\n" + "\n".join(f"- {s}" for s in verdict.suggested)
         )
+    if hasattr(verdict, 'contradicting_evidence_found') and verdict.contradicting_evidence_found:
+        parts.append(
+            "CONTRADICTING EVIDENCE found:\n"
+            + "\n".join(f"- {c}" for c in verdict.contradicting_evidence_found)
+        )
     return "\n\n".join(parts)
 
 
@@ -213,7 +218,8 @@ def generate_gap_queries_dynamic(
             source_lines.append(f"- {s.title} ({s.source_type})")
     source_summary = "\n".join(source_lines) if source_lines else "(no sources yet)"
 
-    # Already executed queries (most recent 30).
+    # Already executed queries (sample of up to 30 for the prompt; set is unordered,
+    # so selection is arbitrary but diverse enough to prevent repeats).
     executed_sorted = sorted(executed_queries)
     recent = executed_sorted[-30:]
     already_run = "\n".join(f"- {q}" for q in recent) if recent else "(none yet)"
@@ -242,9 +248,11 @@ def generate_gap_queries_dynamic(
         line = line.strip()
         if not line:
             continue
-        # Strip "1. ", "1) ", "- ", "* " prefixes.
+        # Strip "1. ", "1) " prefixes only (not content hyphens).
         line = re.sub(r'^\d+[\.\)]\s*', '', line)
-        line = re.sub(r'^[-*]\s*', '', line)
+        # Strip bullet markers like "- " and "* " only when followed by non-digit,
+        # so "-1 penalty" is preserved but "- something" is stripped.
+        line = re.sub(r'^[-*]\s+(?!\d)', '', line)
         if line:
             queries.append(line)
 
