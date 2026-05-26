@@ -4,8 +4,9 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 from langchain_core.runnables import RunnableConfig
 from ora.state import ResearchState, Source, Finding
-from ora.config import load_config
+from ora.config import load_config, get_llm
 from ora.progress import emit_progress
+from ora.prompts import GAP_QUERY_PROMPT
 
 # Domains known to block or heavily rate-limit automated scraping.
 # The researcher will skip these and try other results instead.
@@ -157,6 +158,111 @@ def generate_gap_queries(query: str, intensity: int) -> list[str]:
     return [t.format(query=query) for t in templates]
 
 
+def _format_reviewer_feedback(state: ResearchState) -> str:
+    """Extract reviewer feedback for the gap query prompt.
+
+    Returns empty string if no reviewer verdict exists.
+    """
+    verdict = state.get("review_verdict")
+    if verdict is None:
+        return ""
+
+    parts: list[str] = []
+    if hasattr(verdict, 'blocking') and verdict.blocking:
+        parts.append(
+            "BLOCKING issues:\n" + "\n".join(f"- {b}" for b in verdict.blocking)
+        )
+    if hasattr(verdict, 'required') and verdict.required:
+        parts.append(
+            "REQUIRED improvements:\n" + "\n".join(f"- {r}" for r in verdict.required)
+        )
+    if hasattr(verdict, 'suggested') and verdict.suggested:
+        parts.append(
+            "SUGGESTED improvements:\n" + "\n".join(f"- {s}" for s in verdict.suggested)
+        )
+    if hasattr(verdict, 'contradicting_evidence_found') and verdict.contradicting_evidence_found:
+        parts.append(
+            "CONTRADICTING EVIDENCE found:\n"
+            + "\n".join(f"- {c}" for c in verdict.contradicting_evidence_found)
+        )
+    return "\n\n".join(parts)
+
+
+def generate_gap_queries_dynamic(
+    query: str,
+    intensity: int,
+    sources: list[Source],
+    reviewer_feedback: str,
+    executed_queries: set[str],
+    config: Optional[RunnableConfig] = None,
+) -> list[str]:
+    """Generate adaptive gap queries using the LLM.
+
+    Uses context about what's been found and what the reviewer flagged to
+    produce targeted, varied queries instead of repeating fixed templates.
+
+    Falls back to template-based gap queries if the LLM call fails or if
+    intensity is below 3 (where the cost isn't justified).
+    """
+    # For low intensities, template queries are sufficient.
+    if intensity < 3:
+        return generate_gap_queries(query, intensity)
+
+    # Number of queries to request from the LLM.
+    count = {3: 5, 4: 7, 5: 10}.get(intensity, 5)
+
+    # Build source summary: titles + key topics from findings.
+    source_lines: list[str] = []
+    for s in sources[:30]:
+        if s.title:
+            source_lines.append(f"- {s.title} ({s.source_type})")
+    source_summary = "\n".join(source_lines) if source_lines else "(no sources yet)"
+
+    # Already executed queries (sample of up to 30 for the prompt; set is unordered,
+    # so selection is arbitrary but diverse enough to prevent repeats).
+    executed_sorted = sorted(executed_queries)
+    recent = executed_sorted[-30:]
+    already_run = "\n".join(f"- {q}" for q in recent) if recent else "(none yet)"
+
+    try:
+        settings = load_config()
+        model_name = settings.models.researcher or settings.models.default
+        llm = get_llm(model_name, temperature=0.8)
+        prompt_text = GAP_QUERY_PROMPT.format(
+            query=query,
+            source_summary=source_summary,
+            reviewer_feedback=reviewer_feedback or "(no reviewer feedback yet)",
+            already_run=already_run,
+            count=count,
+        )
+        response = llm.invoke(prompt_text)
+        text = response.content if hasattr(response, 'content') else str(response)
+    except Exception:
+        # Fall back to template queries if LLM call fails.
+        emit_progress(config, "Researcher: gap query LLM failed, using templates", kind="warning")
+        return generate_gap_queries(query, intensity)
+
+    # Parse: one query per line, strip numbering and bullets.
+    queries = []
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Strip "1. ", "1) " prefixes only (not content hyphens).
+        line = re.sub(r'^\d+[\.\)]\s*', '', line)
+        # Strip bullet markers like "- " and "* " only when followed by non-digit,
+        # so "-1 penalty" is preserved but "- something" is stripped.
+        line = re.sub(r'^[-*]\s+(?!\d)', '', line)
+        if line:
+            queries.append(line)
+
+    if not queries:
+        emit_progress(config, "Researcher: gap query LLM returned no queries, using templates", kind="warning")
+        return generate_gap_queries(query, intensity)
+
+    return queries[:count]
+
+
 def _scrape_and_collect(
     urls: list[str],
     params: dict,
@@ -260,9 +366,10 @@ def researcher_node(
     """Researcher: iterate until min_sources target is reached.
 
     Synchronous node -- uses blocking HTTP calls inside LangGraph's sync execution.
-    Per-query caps prevent one search angle from flooding results, but the overall
-    loop continues generating queries and scraping until min_sources is hit (or the
-    safety max_rounds cap is exceeded).
+    Queries already executed across *all* researcher invocations are deduplicated
+    so the reviewer sending execution back to researcher does not waste search calls.
+    Gap queries after round 1 are generated dynamically by the LLM using context
+    about found sources and reviewer feedback.
     """
     settings = load_config()
 
@@ -286,6 +393,16 @@ def researcher_node(
     }
     log: list[str] = []
     all_queries: list[str] = []
+
+    # Dedup set: queries executed across ALL researcher invocations.
+    # This prevents wasted search calls when the reviewer sends execution back.
+    executed_q_set: set[str] = set(state.get("executed_queries", []))
+    if executed_q_set:
+        log.append(f"Resuming with {len(executed_q_set)} previously-executed queries deduped")
+
+    # Reviewer feedback for targeted gap queries.
+    reviewer_feedback = _format_reviewer_feedback(state)
+
     round_num = 0
 
     while len(sources) < min_sources and round_num < max_rounds:
@@ -299,24 +416,58 @@ def researcher_node(
         if round_num == 1:
             queries_for_round = list(generate_search_queries(query, intensity))
         else:
-            queries_for_round = list(generate_gap_queries(query, intensity))
+            # Dynamic gap queries using LLM: adapt to what's been found and
+            # what the reviewer flagged. Falls back to templates on failure.
+            queries_for_round = generate_gap_queries_dynamic(
+                query=query,
+                intensity=intensity,
+                sources=sources,
+                reviewer_feedback=reviewer_feedback,
+                executed_queries=executed_q_set,
+                config=config,
+            )
 
-        if not queries_for_round:
-            emit_progress(config, "Researcher: no more queries to try", kind="info")
+        # Filter out queries already executed in any prior invocation.
+        fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
+        if not fresh_queries and round_num > 1:
+            # All gap queries are duplicates -- try one more LLM generation
+            # with explicit instruction to avoid repeats.
+            emit_progress(
+                config,
+                "Researcher: all gap queries were duplicates, regenerating...",
+                kind="warning",
+            )
+            queries_for_round = generate_gap_queries_dynamic(
+                query=query,
+                intensity=intensity,
+                sources=sources,
+                reviewer_feedback=reviewer_feedback,
+                executed_queries=executed_q_set,
+                config=config,
+            )
+            fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
+
+        if not fresh_queries:
+            emit_progress(
+                config,
+                f"Researcher: no new queries to try after {round_num} rounds",
+                kind="info",
+            )
             break
 
         kind_label = "search" if round_num == 1 else "gap"
-        query_label = "query" if len(queries_for_round) == 1 else "queries"
+        query_label = "query" if len(fresh_queries) == 1 else "queries"
         emit_progress(
             config,
-            f"Researcher: generated {len(queries_for_round)} {kind_label} {query_label}",
+            f"Researcher: {len(fresh_queries)} {kind_label} {query_label} ({len(queries_for_round) - len(fresh_queries)} duplicates skipped)",
             kind="search",
         )
 
-        for q in queries_for_round:
+        for q in fresh_queries:
             if len(sources) >= min_sources:
                 break
 
+            executed_q_set.add(q)
             all_queries.append(q)
             log.append(f"Search: {q}")
             emit_progress(config, f'Researcher: searching "{q}"', kind="search")
@@ -361,6 +512,7 @@ def researcher_node(
 
     return {
         "search_queries": all_queries,
+        "executed_queries": list(executed_q_set),
         "sources": sources[prior_source_count:],
         "findings": findings[prior_finding_count:],
         "research_status": research_status,

@@ -42,7 +42,7 @@ def test_researcher_emits_progress_events(monkeypatch):
     assert "search" in kinds
     assert "scrape" in kinds
     assert "success" in kinds
-    assert any("generated 1 search query" in message for message in messages)
+    assert any("1 search query" in message for message in messages)
     assert any('searching "Rust vs Go"' in message for message in messages)
     assert any("found 1 URL" in message for message in messages)
     assert any("scraped" in message for message in messages)
