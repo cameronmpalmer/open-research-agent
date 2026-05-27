@@ -74,6 +74,30 @@ def _extract_search_result_titles(search_results: str) -> dict[str, str]:
     return titles
 
 
+def _prefilter_urls(
+    urls: list[str],
+    seen_urls: set[str],
+) -> tuple[list[str], int, int]:
+    """Filter URLs to remove already-seen and hostile-domain entries.
+
+    Returns a tuple of (new_urls, dup_count, hostile_count).
+    The caller receives only guaranteed-fresh, non-hostile URLs.
+    """
+    new_urls = []
+    skipped_dup = 0
+    skipped_hostile = 0
+    for url in urls:
+        normalized = _normalize_url_for_dedupe(url)
+        if normalized in seen_urls:
+            skipped_dup += 1
+            continue
+        if _should_skip_url(url):
+            skipped_hostile += 1
+            continue
+        new_urls.append(url)
+    return new_urls, skipped_dup, skipped_hostile
+
+
 def generate_search_queries(query: str, intensity: int) -> list[str]:
     """Generate search queries based on intensity level."""
     angles = {
@@ -477,13 +501,28 @@ def researcher_node(
             if search_failed:
                 emit_progress(config, f'Researcher: search failed for "{q}"', kind="error")
 
-            urls = re.findall(r'https?://[^\s<>"\')\]]+', r)
+            raw_urls = re.findall(r'https?://[^\s<>"\')\]]+', r)
             url_titles = _extract_search_result_titles(r)
-            log.append(f"  URLs found: {len(urls)}")
+            raw_count = len(raw_urls)
+
+            # Pre-filter: remove duplicates and hostile domains so the
+            # scraper only processes guaranteed-fresh URLs.
+            urls, skipped_dup, skipped_hostile = _prefilter_urls(raw_urls, seen_urls)
+            log.append(
+                f"  URLs found: {raw_count} total, {len(urls)} new"
+                f" ({skipped_dup} dups, {skipped_hostile} hostile)"
+            )
+
             url_label = "URL" if len(urls) == 1 else "URLs"
+            dedup_note = ""
+            if skipped_dup or skipped_hostile:
+                dedup_note = f" (filtered: {skipped_dup} dups"
+                if skipped_hostile:
+                    dedup_note += f", {skipped_hostile} hostile"
+                dedup_note += ")"
             emit_progress(
                 config,
-                f"Researcher: found {len(urls)} {url_label}",
+                f"Researcher: found {len(urls)} new {url_label}{dedup_note}",
                 kind="info" if search_failed else "success",
             )
 

@@ -44,7 +44,7 @@ def test_researcher_emits_progress_events(monkeypatch):
     assert "success" in kinds
     assert any("1 search query" in message for message in messages)
     assert any('searching "Rust vs Go"' in message for message in messages)
-    assert any("found 1 URL" in message for message in messages)
+    assert any("found 1 new URL" in message for message in messages)
     assert any("scraped" in message for message in messages)
     assert any("finished with 1 source" in message for message in messages)
 
@@ -100,7 +100,7 @@ def test_researcher_uses_fallback_finding_when_no_urls_found(monkeypatch):
     assert len(result["findings"]) == 1
     assert result["findings"][0].confidence == "Unknown"
     assert "success" in kinds
-    assert any("found 0 URLs" in message for message in messages)
+    assert any("found 0 new URLs" in message for message in messages)
     assert any("finished with 0 sources and 1 finding" in message for message in messages)
 
 
@@ -159,7 +159,9 @@ def test_researcher_deduplicates_repeated_source_urls(monkeypatch):
     assert result["research_status"] == "interim"
 
     messages = [event["message"] for event in events]
-    assert any("skipping duplicate" in message for message in messages)
+    # After the first scrape, subsequent searches should see the URL pre-filtered as a duplicate
+    assert any("1 dups" in message for message in messages)
+    assert any("found 0 new URLs" in message for message in messages)
 
 
 def test_researcher_uses_search_result_titles_for_sources(monkeypatch):
@@ -239,7 +241,9 @@ def test_researcher_skips_hostile_domains(monkeypatch):
     assert len(result["sources"]) == 1
     assert len(result["findings"]) == 1
     assert result["findings"][0].confidence == "Moderate"
-    assert any("skipping" in message for message in messages)
+    # Hostile domains are pre-filtered before scraping. The summary shows:
+    # "found 1 new URL (filtered: 0 dups, 2 hostile)"
+    assert any("2 hostile" in message for message in messages)
     assert any("example.com" in message for message in messages)
     assert not any("reddit.com" in message and "scraped" in message for message in messages)
     assert not any("medium.com" in message and "scraped" in message for message in messages)
