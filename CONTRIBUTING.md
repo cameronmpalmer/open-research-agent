@@ -36,7 +36,7 @@ If you are new to contributing to open source, here is the standard workflow. OR
 
 ## Development setup
 
-Use Python 3.10 or newer.
+Use Python 3.10.
 
 ```bash
 python3 -m venv .venv
