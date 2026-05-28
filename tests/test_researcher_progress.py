@@ -258,7 +258,6 @@ def test_scrape_and_collect_deduplicates_intra_query_duplicates(monkeypatch):
     caught by _scrape_and_collect itself.
     """
     from ora.agents.researcher import _scrape_and_collect, LEVEL_PARAMS
-    from ora.agents.researcher import _normalize_url_for_dedupe
 
     monkeypatch.setattr(
         "ora.tools.scrape.scrape_page",
