@@ -9,23 +9,54 @@ from ora.progress import emit_progress
 
 
 def _format_findings_for_prompt(findings: list) -> str:
-    """Format findings list into a string for the writer prompt."""
+    """Format findings list into a string for the writer prompt.
+
+    When extraction data is available (intensity 3+), includes the
+    structured extraction fields. Otherwise, formats the basic claim.
+    """
     if not findings:
         return "No findings available."
+
     lines = []
     for i, f in enumerate(findings, 1):
+        # Handle both Pydantic model and dict (LangGraph serialization)
         if hasattr(f, 'claim'):
             claim = f.claim
             confidence = f.confidence
             sources = ", ".join(f.supporting_sources[:3]) if f.supporting_sources else "no sources"
+            extraction = getattr(f, 'extraction', None)
         elif isinstance(f, dict):
             claim = f.get("claim", "")
             confidence = f.get("confidence", "Moderate")
             sources = ", ".join(f.get("supporting_sources", [])[:3])
+            extraction = f.get("extraction")
         else:
             continue
+
         lines.append(f"{i}. [{confidence}] {claim}")
         lines.append(f"   Sources: {sources}")
+
+        # If we have LLM-extracted details, include them.
+        if extraction is not None:
+            if hasattr(extraction, 'key_claims') and extraction.key_claims:
+                lines.append("   Key claims:")
+                for c in extraction.key_claims[:5]:  # cap at 5
+                    lines.append(f"     - {c}")
+            if hasattr(extraction, 'recommendations') and extraction.recommendations:
+                lines.append("   Recommendations:")
+                for r in extraction.recommendations[:5]:
+                    lines.append(f"     - {r}")
+            if hasattr(extraction, 'data_points') and extraction.data_points:
+                lines.append("   Data points:")
+                for d in extraction.data_points[:5]:
+                    lines.append(f"     - {d}")
+            if hasattr(extraction, 'named_entities') and extraction.named_entities:
+                lines.append(f"   Named: {', '.join(extraction.named_entities[:10])}")
+            if hasattr(extraction, 'comparisons') and extraction.comparisons:
+                lines.append("   Comparisons:")
+                for cmp in extraction.comparisons[:3]:
+                    lines.append(f"     - {cmp}")
+
         lines.append("")
     return "\n".join(lines)
 
