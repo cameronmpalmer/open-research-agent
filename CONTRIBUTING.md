@@ -2,6 +2,38 @@
 
 Thanks for your interest in improving Open Research Agent (ORA).
 
+## First-time contributors
+
+If you are new to contributing to open source, here is the standard workflow. ORA uses the **fork-and-PR model**: external contributors fork the repo, work on a branch, and open a pull request.
+
+1. **Find an issue.** Look for issues labeled
+   [`good first issue`](https://github.com/cameronmpalmer/open-research-agent/labels/good%20first%20issue).
+   Comment on the issue to let others know you are working on it.
+
+2. **Fork the repo.** Click **Fork** at the top-right of the
+   [repository page](https://github.com/cameronmpalmer/open-research-agent).
+
+3. **Clone your fork:**
+   ```bash
+   git clone https://github.com/YOUR-USERNAME/open-research-agent.git
+   cd open-research-agent
+   ```
+
+4. **Create a branch** with a short, descriptive name:
+   ```bash
+   git checkout -b feat/your-feature-name
+   # or fix/your-bugfix-name, docs/what-you-updated, etc.
+   ```
+
+5. **Make your changes.** Follow the sections below for dev setup and testing.
+
+6. **Open a pull request** from your fork's branch to `main` on the upstream repo.
+   Reference the issue number in the PR description (e.g., `Closes #6`).
+   Tag `@cameronmpalmer` as a reviewer.
+
+7. **Iterate on review feedback.** Push additional commits to the same branch;
+   they will appear in the open PR automatically.
+
 ## Development setup
 
 Use Python 3.10 or newer.
