@@ -42,7 +42,6 @@ def extract_and_evaluate(
 
     settings = load_config()
     model_name = settings.models.researcher or settings.models.default
-    llm = get_llm(model_name, temperature=0.1)
 
     prompt_text = EXTRACTOR_PROMPT.format(
         query=query,
@@ -53,6 +52,7 @@ def extract_and_evaluate(
     )
 
     try:
+        llm = get_llm(model_name, temperature=0.1)
         response = llm.invoke(prompt_text)
         text = response.content if hasattr(response, 'content') else str(response)
     except Exception:

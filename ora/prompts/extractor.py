@@ -31,7 +31,7 @@ If a category has nothing to extract, use an empty list. Do not fabricate conten
 
 Return ONLY a JSON object with no markdown fences, no extra text:
 
-{"summary": "...", "key_claims": ["...", "..."], "recommendations": ["...", "..."], "named_entities": ["...", "..."], "data_points": ["...", "..."], "comparisons": ["...", "..."], "criticisms": ["...", "..."], "source_reliability": "Medium", "reliability_rationale": "..."}
+{{"summary": "...", "key_claims": ["...", "..."], "recommendations": ["...", "..."], "named_entities": ["...", "..."], "data_points": ["...", "..."], "comparisons": ["...", "..."], "criticisms": ["...", "..."], "source_reliability": "Medium", "reliability_rationale": "..."}}
 
 Research query: {query}
 Source title: {title}
