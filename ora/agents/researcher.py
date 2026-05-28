@@ -522,7 +522,7 @@ def researcher_node(
                 dedup_note += ")"
             emit_progress(
                 config,
-                f"Researcher: found {len(urls)} new {url_label}{dedup_note}",
+                f"Researcher: found {len(urls)} candidate {url_label}{dedup_note}",
                 kind="info" if search_failed else "success",
             )
 

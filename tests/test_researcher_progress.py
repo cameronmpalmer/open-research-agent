@@ -44,7 +44,7 @@ def test_researcher_emits_progress_events(monkeypatch):
     assert "success" in kinds
     assert any("1 search query" in message for message in messages)
     assert any('searching "Rust vs Go"' in message for message in messages)
-    assert any("found 1 new URL" in message for message in messages)
+    assert any("found 1 candidate URL" in message for message in messages)
     assert any("scraped" in message for message in messages)
     assert any("finished with 1 source" in message for message in messages)
 
@@ -100,7 +100,7 @@ def test_researcher_uses_fallback_finding_when_no_urls_found(monkeypatch):
     assert len(result["findings"]) == 1
     assert result["findings"][0].confidence == "Unknown"
     assert "success" in kinds
-    assert any("found 0 new URLs" in message for message in messages)
+    assert any("found 0 candidate URLs" in message for message in messages)
     assert any("finished with 0 sources and 1 finding" in message for message in messages)
 
 
@@ -161,7 +161,7 @@ def test_researcher_deduplicates_repeated_source_urls(monkeypatch):
     messages = [event["message"] for event in events]
     # After the first scrape, subsequent searches should see the URL pre-filtered as a duplicate
     assert any("1 dups" in message for message in messages)
-    assert any("found 0 new URLs" in message for message in messages)
+    assert any("found 0 candidate URLs" in message for message in messages)
 
 
 def test_researcher_uses_search_result_titles_for_sources(monkeypatch):
@@ -242,8 +242,52 @@ def test_researcher_skips_hostile_domains(monkeypatch):
     assert len(result["findings"]) == 1
     assert result["findings"][0].confidence == "Moderate"
     # Hostile domains are pre-filtered before scraping. The summary shows:
-    # "found 1 new URL (filtered: 0 dups, 2 hostile)"
+    # "found 1 candidate URL (filtered: 0 dups, 2 hostile)"
     assert any("2 hostile" in message for message in messages)
     assert any("example.com" in message for message in messages)
     assert not any("reddit.com" in message and "scraped" in message for message in messages)
     assert not any("medium.com" in message and "scraped" in message for message in messages)
+
+
+def test_scrape_and_collect_deduplicates_intra_query_duplicates(monkeypatch):
+    """Verify _scrape_and_collect's internal dedup safety net catches the
+    same URL appearing twice within a single search result.
+
+    The prefilter handles cross-search dedup, but intra-search duplicates
+    (same URL appearing twice in one Firecrawl response) must still be
+    caught by _scrape_and_collect itself.
+    """
+    from ora.agents.researcher import _scrape_and_collect, LEVEL_PARAMS
+    from ora.agents.researcher import _normalize_url_for_dedupe
+
+    monkeypatch.setattr(
+        "ora.tools.scrape.scrape_page",
+        FakeTool("Scraped content about test topic."),
+    )
+    monkeypatch.setattr(
+        "ora.tools.evaluate.evaluate_source",
+        lambda url, title, content, source_type: Source(
+            url=url, title=title or "Untitled", source_type=source_type
+        ),
+    )
+
+    sources = []
+    findings = []
+    seen_urls = set()
+    log = []
+    params = LEVEL_PARAMS[3]  # urls_per_query=5, scrapes_per_query=3
+
+    # Same URL twice in one hypothetical search result
+    urls = [
+        "https://example.com/article",
+        "https://example.com/article",
+    ]
+
+    _scrape_and_collect(
+        urls, params, 8000, None, log,
+        sources, findings, seen_urls, {}, min_sources=15,
+    )
+
+    assert len(sources) == 1, "Duplicate URL should be caught by internal dedup"
+    assert len(seen_urls) == 1
+    assert "skipping duplicate" in "\n".join(log).lower()
