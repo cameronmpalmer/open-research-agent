@@ -239,3 +239,94 @@ class TestQueryDeduplication:
         assert len(result["executed_queries"]) > 0
         # The query itself should be in there.
         assert any("test query" in q for q in result["executed_queries"])
+
+
+class TestIntensityGatedExtraction:
+    """Verify that intensity 1-2 uses heuristic evaluation, 3+ uses LLM extraction."""
+
+    def test_intensity_1_uses_heuristic_evaluation(self, monkeypatch):
+        """At intensity 1, _scrape_and_collect should call the heuristic
+        evaluate_source, not the LLM extract_and_evaluate."""
+        from ora.state import Source
+        from ora.agents.researcher import _scrape_and_collect
+
+        call_log = []
+
+        class FakeTool:
+            def __init__(self, value):
+                self.value = value
+            def invoke(self, _args):
+                return self.value
+
+        monkeypatch.setattr(
+            "ora.tools.scrape.scrape_page",
+            FakeTool("Some article content for testing the heuristic path."),
+        )
+
+        def fake_evaluate(*args, **kwargs):
+            call_log.append("heuristic")
+            return Source(url=kwargs.get("url", "https://example.com"), title="")
+
+        monkeypatch.setattr("ora.tools.evaluate.evaluate_source", fake_evaluate)
+
+        _scrape_and_collect(
+            urls=["https://example.com/article"],
+            params={"urls_per_query": 1, "scrapes_per_query": 1},
+            max_content_chars=8000,
+            config=None,
+            log=[],
+            sources=[],
+            findings=[],
+            seen_urls=set(),
+            url_titles={},
+            min_sources=3,
+            query="test",
+            intensity=1,
+        )
+
+        assert "heuristic" in call_log
+
+    def test_intensity_4_uses_llm_extraction(self, monkeypatch):
+        """At intensity 4, _scrape_and_collect should call the LLM
+        extract_and_evaluate, not the heuristic."""
+        from ora.state import Source, SourceExtraction
+        from ora.agents.researcher import _scrape_and_collect
+
+        call_log = []
+
+        class FakeTool:
+            def __init__(self, value):
+                self.value = value
+            def invoke(self, _args):
+                return self.value
+
+        monkeypatch.setattr(
+            "ora.tools.scrape.scrape_page",
+            FakeTool("Some article content for testing the LLM extraction path."),
+        )
+
+        def fake_extract(*args, **kwargs):
+            call_log.append("llm_extract")
+            return (
+                Source(url=kwargs.get("url", "https://example.com"), title=""),
+                SourceExtraction(summary="test summary"),
+            )
+
+        monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", fake_extract)
+
+        _scrape_and_collect(
+            urls=["https://example.com/article"],
+            params={"urls_per_query": 1, "scrapes_per_query": 1},
+            max_content_chars=12000,
+            config=None,
+            log=[],
+            sources=[],
+            findings=[],
+            seen_urls=set(),
+            url_titles={},
+            min_sources=50,
+            query="test",
+            intensity=4,
+        )
+
+        assert "llm_extract" in call_log

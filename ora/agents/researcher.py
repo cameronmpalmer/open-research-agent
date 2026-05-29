@@ -299,6 +299,8 @@ def _scrape_and_collect(
     url_titles: dict[str, str],
     *_,
     min_sources: int,
+    query: str = "",
+    intensity: int = 2,
 ) -> bool:
     """Scrape URLs up to the per-query cap, appending to sources/findings.
 
@@ -343,13 +345,35 @@ def _scrape_and_collect(
 
         c = c[:max_content_chars]
 
+        # Normalize the URL for source URL tracking.
+        # source.url remains as-is (the original), seen_urls uses the normalized variant.
         try:
-            source = evaluate_source(
-                url=url,
-                title=url_titles.get(normalized_url, ""),
-                content=c,
-                source_type="unknown",
-            )
+            if intensity >= 3:
+                # LLM-powered extraction + evaluation at high intensities.
+                from ora.tools.extract import extract_and_evaluate
+                source, extraction = extract_and_evaluate(
+                    url=url,
+                    title=url_titles.get(normalized_url, ""),
+                    content=c,
+                    source_type="unknown",
+                    query=query,
+                    config=config,
+                )
+                # Use the LLM-extracted summary as the claim (much richer than c[:500]).
+                claim_text = extraction.summary if extraction.summary else c[:500]
+                log.append(f"  Extracted: {len(extraction.key_claims)} claims, "
+                           f"{len(extraction.recommendations)} recommendations, "
+                           f"reliability={extraction.source_reliability}")
+            else:
+                # Heuristic evaluation for cost efficiency at low intensities.
+                source = evaluate_source(
+                    url=url,
+                    title=url_titles.get(normalized_url, ""),
+                    content=c,
+                    source_type="unknown",
+                )
+                extraction = None
+                claim_text = c[:500]
         except Exception as e:
             log.append(f"  Source eval failed from {url[:60]}: {e}")
             emit_progress(config, f"Researcher: source evaluation failed for {display_url}", kind="error")
@@ -360,6 +384,8 @@ def _scrape_and_collect(
                 overall_reliability="Low",
                 notes=f"Source evaluation failed: {e}",
             )
+            extraction = None
+            claim_text = c[:500] if c else ""
         else:
             emit_progress(config, "Researcher: evaluated source reliability", kind="info")
 
@@ -372,9 +398,10 @@ def _scrape_and_collect(
         seen_urls.add(normalized_url)
         findings.append(
             Finding(
-                claim=c[:500],
+                claim=claim_text,
                 confidence=finding_confidence,  # type: ignore[arg-type]
                 supporting_sources=[url],
+                extraction=extraction,
             )
         )
         scraped_this_query += 1
@@ -529,6 +556,7 @@ def researcher_node(
             if _scrape_and_collect(
                 urls, params, max_content_chars, config, log,
                 sources, findings, seen_urls, url_titles, min_sources=min_sources,
+                query=query, intensity=intensity,
             ):
                 break
 
