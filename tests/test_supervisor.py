@@ -1,6 +1,6 @@
 """Tests for supervisor agent."""
 import pytest
-from ora.agents.supervisor import _extract_search_queries
+from ora.agents.supervisor import _extract_search_queries, _search_queries_fence_found
 from ora.state import ResearchState
 
 
@@ -69,6 +69,36 @@ More text."""
 ```"""
         result = _extract_search_queries(text)
         assert result == ["query with space", "another"]
+
+
+class TestSearchQueriesFenceFound:
+    def test_fence_found_valid(self):
+        text = """```search_queries
+["valid"]
+```"""
+        assert _search_queries_fence_found(text) is True
+
+    def test_fence_found_bad_content(self):
+        text = """```search_queries
+{invalid}
+```"""
+        assert _search_queries_fence_found(text) is True
+
+    def test_fence_found_blank_content(self):
+        text = """```search_queries
+
+```"""
+        assert _search_queries_fence_found(text) is True
+
+    def test_no_fence(self):
+        text = "Just a plan with no fence."
+        assert _search_queries_fence_found(text) is False
+
+    def test_fence_with_space(self):
+        text = """``` search_queries
+["query"]
+```"""
+        assert _search_queries_fence_found(text) is True
 
 
 def test_plan_node_sets_search_queries(monkeypatch):

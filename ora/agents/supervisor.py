@@ -6,6 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from ora.state import ResearchState
 from ora.prompts import SUPERVISOR_PLAN_PROMPT, SUPERVISOR_REVISE_PROMPT, _search_query_count
 from ora.config import load_config, get_llm, get_supervisor_model
+from ora.progress import emit_progress
 
 
 def _invoke_supervisor(prompt: str) -> str:
@@ -17,12 +18,21 @@ def _invoke_supervisor(prompt: str) -> str:
     return response.content if hasattr(response, 'content') else str(response)
 
 
+_FENCE_RE = re.compile(r'```\s*search_queries\s*\n(.*?)```', re.DOTALL)
+
+
+def _search_queries_fence_found(plan_text: str) -> bool:
+    """Return True if the plan text contains a search_queries code fence,
+    regardless of whether the content can be parsed correctly."""
+    return bool(_FENCE_RE.search(plan_text))
+
+
 def _extract_search_queries(plan_text: str) -> list[str]:
     """Extract JSON search queries from supervisor response code fence.
 
     Returns empty list on any failure (no fence, bad JSON, wrong type).
     """
-    m = re.search(r'```\s*search_queries\s*\n(.*?)```', plan_text, re.DOTALL)
+    m = _FENCE_RE.search(plan_text)
     if not m:
         return []
 
@@ -54,9 +64,17 @@ def plan_node(
         count=_search_query_count(intensity),
     )
     response_text = _invoke_supervisor(prompt)
+    search_queries = _extract_search_queries(response_text)
+    if not search_queries and _search_queries_fence_found(response_text):
+        emit_progress(
+            config,
+            "Supervisor provided a search_queries block but queries could not be parsed, "
+            "falling back to template-generated queries",
+            kind="warning",
+        )
     return {
         "research_plan": response_text,
-        "search_queries": _extract_search_queries(response_text),
+        "search_queries": search_queries,
         "messages": [response_text],
     }
 

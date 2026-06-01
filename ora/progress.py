@@ -9,7 +9,7 @@ import logging
 from typing import Any, Literal, TypedDict
 
 
-ProgressKind = Literal["info", "search", "scrape", "success", "error", "write"]
+ProgressKind = Literal["info", "search", "scrape", "success", "error", "warning", "write"]
 
 logger = logging.getLogger(__name__)
 
