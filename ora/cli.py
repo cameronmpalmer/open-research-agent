@@ -164,7 +164,8 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     plan = plan_result.get("research_plan", "No plan generated.")
 
     # Warn if supervisor provided a search_queries fence but parsing failed
-    if plan and "search_queries" in plan and not plan_result.get("search_queries"):
+    from ora.agents.supervisor import _search_queries_fence_found
+    if _search_queries_fence_found(plan) and not plan_result.get("search_queries"):
         click.echo(
             "  ⚠️  Supervisor provided a search_queries block but queries could not"
             " be parsed; falling back to default search queries.", err=True,
@@ -176,7 +177,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     if auto_approve:
         click.echo()
     else:
-        from ora.agents.supervisor import revise_plan_text, _extract_search_queries, _search_queries_fence_found
+        from ora.agents.supervisor import revise_plan_text, _extract_search_queries
 
         while True:
             choice = click.prompt(
