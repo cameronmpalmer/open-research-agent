@@ -447,7 +447,6 @@ def researcher_node(
         if hasattr(source, "url")
     }
     log: list[str] = []
-    all_queries: list[str] = []
 
     # Dedup set: queries executed across ALL researcher invocations.
     # This prevents wasted search calls when the reviewer sends execution back.
@@ -527,7 +526,6 @@ def researcher_node(
                 break
 
             executed_q_set.add(q)
-            all_queries.append(q)
             log.append(f"Search: {q}")
             emit_progress(config, f'Researcher: searching "{q}"', kind="search")
             r = web_search.invoke({"query": q})
