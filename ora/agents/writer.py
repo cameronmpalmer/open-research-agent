@@ -38,23 +38,37 @@ def _format_findings_for_prompt(findings: list) -> str:
 
         # If we have LLM-extracted details, include them.
         if extraction is not None:
-            if hasattr(extraction, 'key_claims') and extraction.key_claims:
+            # Handle both dict (LangGraph serialized) and Pydantic model.
+            if isinstance(extraction, dict):
+                kc = extraction.get("key_claims", [])
+                recs = extraction.get("recommendations", [])
+                dps = extraction.get("data_points", [])
+                ents = extraction.get("named_entities", [])
+                comps = extraction.get("comparisons", [])
+            else:
+                kc = getattr(extraction, 'key_claims', [])
+                recs = getattr(extraction, 'recommendations', [])
+                dps = getattr(extraction, 'data_points', [])
+                ents = getattr(extraction, 'named_entities', [])
+                comps = getattr(extraction, 'comparisons', [])
+
+            if kc:
                 lines.append("   Key claims:")
-                for c in extraction.key_claims[:5]:  # cap at 5
+                for c in kc[:5]:
                     lines.append(f"     - {c}")
-            if hasattr(extraction, 'recommendations') and extraction.recommendations:
+            if recs:
                 lines.append("   Recommendations:")
-                for r in extraction.recommendations[:5]:
+                for r in recs[:5]:
                     lines.append(f"     - {r}")
-            if hasattr(extraction, 'data_points') and extraction.data_points:
+            if dps:
                 lines.append("   Data points:")
-                for d in extraction.data_points[:5]:
+                for d in dps[:5]:
                     lines.append(f"     - {d}")
-            if hasattr(extraction, 'named_entities') and extraction.named_entities:
-                lines.append(f"   Named: {', '.join(extraction.named_entities[:10])}")
-            if hasattr(extraction, 'comparisons') and extraction.comparisons:
+            if ents:
+                lines.append(f"   Named: {', '.join(ents[:10])}")
+            if comps:
                 lines.append("   Comparisons:")
-                for cmp in extraction.comparisons[:3]:
+                for cmp in comps[:3]:
                     lines.append(f"     - {cmp}")
 
         lines.append("")

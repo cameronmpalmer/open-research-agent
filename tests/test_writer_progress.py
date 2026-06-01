@@ -95,3 +95,39 @@ def test_writer_handles_empty_findings_prompt(monkeypatch):
     assert result["draft_report"].startswith("# Research")
     assert any("No findings available." in prompt for prompt in llm.prompts)
     assert [event["kind"] for event in events] == ["write", "success"]
+
+
+def test_format_findings_includes_dict_extraction_data():
+    """Dict-serialized findings (from LangGraph re-invocation) should
+    surface extraction fields, not silently drop them."""
+    from ora.agents.writer import _format_findings_for_prompt
+
+    finding = {
+        "claim": "This page recommends the Brilliant Cut Grinder.",
+        "confidence": "Moderate",
+        "supporting_sources": ["https://example.com"],
+        "extraction": {
+            "summary": "Best grinder recommendation",
+            "key_claims": [
+                "BCG uses 7075 Aluminum",
+                "BCG is threadless",
+            ],
+            "recommendations": ["Buy the BCG for $88"],
+            "data_points": ["$88", "3 grind plates"],
+            "named_entities": [
+                "Brilliant Cut Grinder",
+                "Grinders For Life",
+            ],
+            "comparisons": ["BCG vs Santa Cruz Shredder"],
+            "criticisms": ["Expensive"],
+        },
+    }
+
+    formatted = _format_findings_for_prompt([finding])
+
+    # Dict-extracted fields should appear in the output.
+    assert "BCG uses 7075 Aluminum" in formatted
+    assert "Buy the BCG for $88" in formatted
+    assert "$88" in formatted
+    assert "Brilliant Cut Grinder" in formatted
+    assert "BCG vs Santa Cruz Shredder" in formatted
