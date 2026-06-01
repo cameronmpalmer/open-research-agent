@@ -358,6 +358,7 @@ def _scrape_and_collect(
                     source_type="unknown",
                     query=query,
                     config=config,
+                    max_chars=max_content_chars,
                 )
                 # Use the LLM-extracted summary as the claim (much richer than c[:500]).
                 claim_text = extraction.summary if extraction.summary else c[:500]

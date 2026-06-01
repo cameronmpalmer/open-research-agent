@@ -1,5 +1,11 @@
 """Per-source extraction and evaluation prompt."""
 
+# IMPORTANT: This prompt string uses Python's str.format() with curly-brace
+# placeholders like {query}, {title}, etc. The JSON schema example uses DOUBLE
+# braces {{ }} to escape literal braces. If you modify the JSON example, keep
+# ALL braces doubled. Adding a new .format() placeholder requires care to not
+# conflict with JSON braces.
+
 EXTRACTOR_PROMPT = """You are a research extraction engine. Read the full content of a source page and produce two things:
 
 1. A structured extraction of everything this source says that is relevant to the research query

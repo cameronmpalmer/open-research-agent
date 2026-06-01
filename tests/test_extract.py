@@ -62,7 +62,8 @@ def test_extract_and_evaluate_falls_back_on_json_error(monkeypatch):
 
     class BrokenLLM:
         class _Response:
-            content = "not valid json at all, just prose"
+            def __init__(self, content="not valid json at all, just prose"):
+                self.content = content
         def invoke(self, _prompt):
             return self._Response()
 
