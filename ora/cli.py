@@ -85,6 +85,7 @@ def _format_progress_event(event: dict) -> str:
         "scrape": "🌐",
         "success": "✓",
         "error": "✗",
+        "warning": "⚠️",
         "write": "✍️",
         "info": "•",
     }
@@ -162,13 +163,20 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     plan_result = _spin(lambda: plan_graph.invoke(initial_state), message="Generating research plan...")
     plan = plan_result.get("research_plan", "No plan generated.")
 
+    # Warn if supervisor provided a search_queries fence but parsing failed
+    if plan and "search_queries" in plan and not plan_result.get("search_queries"):
+        click.echo(
+            "  ⚠️  Supervisor provided a search_queries block but queries could not"
+            " be parsed; falling back to default search queries.", err=True,
+        )
+
     if not (auto_approve and hide_plan_on_autoapprove):
         _print_markdown(plan)
 
     if auto_approve:
         click.echo()
     else:
-        from ora.agents.supervisor import revise_plan_text, _extract_search_queries
+        from ora.agents.supervisor import revise_plan_text, _extract_search_queries, _search_queries_fence_found
 
         while True:
             choice = click.prompt(
@@ -191,6 +199,8 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
                     continue
                 plan = plan_result["research_plan"] = edited.rstrip("\n") + "\n"
                 plan_result["search_queries"] = _extract_search_queries(plan)
+                if not plan_result["search_queries"] and _search_queries_fence_found(plan):
+                    click.echo("  ⚠️  Supervisor search_queries block found but could not be parsed; falling back to template-generated queries")
                 _print_markdown(plan)
             elif choice == "R":
                 feedback = click.prompt("  Feedback for supervisor")
@@ -199,6 +209,8 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
                     message="Revising plan...",
                 )
                 plan_result["search_queries"] = _extract_search_queries(plan)
+                if not plan_result["search_queries"] and _search_queries_fence_found(plan):
+                    click.echo("  ⚠️  Supervisor search_queries block found but could not be parsed; falling back to template-generated queries")
                 _print_markdown(plan)
 
     # Phase 2: Run research pipeline
