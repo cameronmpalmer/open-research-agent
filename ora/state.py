@@ -81,7 +81,7 @@ class ResearchState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
 
     # Research
-    search_queries: list[str]
+    search_queries: list[str]  # Set by supervisor plan_node, read by researcher for round 1
     # Accumulates across researcher invocations so queries are never repeated
     # after a reviewer REVISE sends execution back to researcher.
     executed_queries: Annotated[list[str], _list_reducer]
