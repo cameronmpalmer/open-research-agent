@@ -11,6 +11,7 @@ venv/
 .coverage
 htmlcov/
 .ruff_cache/
+.playwright-mcp/
 
 # Generated ORA research reports
 *-20??-??-??-??????.md
