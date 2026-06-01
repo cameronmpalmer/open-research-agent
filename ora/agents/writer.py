@@ -9,68 +9,23 @@ from ora.progress import emit_progress
 
 
 def _format_findings_for_prompt(findings: list) -> str:
-    """Format findings list into a string for the writer prompt.
-
-    When extraction data is available (intensity 3+), includes the
-    structured extraction fields. Otherwise, formats the basic claim.
-    """
+    """Format findings list into a string for the writer prompt."""
     if not findings:
         return "No findings available."
-
     lines = []
     for i, f in enumerate(findings, 1):
-        # Handle both Pydantic model and dict (LangGraph serialization)
         if hasattr(f, 'claim'):
             claim = f.claim
             confidence = f.confidence
             sources = ", ".join(f.supporting_sources[:3]) if f.supporting_sources else "no sources"
-            extraction = getattr(f, 'extraction', None)
         elif isinstance(f, dict):
             claim = f.get("claim", "")
             confidence = f.get("confidence", "Moderate")
             sources = ", ".join(f.get("supporting_sources", [])[:3])
-            extraction = f.get("extraction")
         else:
             continue
-
         lines.append(f"{i}. [{confidence}] {claim}")
         lines.append(f"   Sources: {sources}")
-
-        # If we have LLM-extracted details, include them.
-        if extraction is not None:
-            # Handle both dict (LangGraph serialized) and Pydantic model.
-            if isinstance(extraction, dict):
-                kc = extraction.get("key_claims", [])
-                recs = extraction.get("recommendations", [])
-                dps = extraction.get("data_points", [])
-                ents = extraction.get("named_entities", [])
-                comps = extraction.get("comparisons", [])
-            else:
-                kc = getattr(extraction, 'key_claims', [])
-                recs = getattr(extraction, 'recommendations', [])
-                dps = getattr(extraction, 'data_points', [])
-                ents = getattr(extraction, 'named_entities', [])
-                comps = getattr(extraction, 'comparisons', [])
-
-            if kc:
-                lines.append("   Key claims:")
-                for c in kc[:5]:
-                    lines.append(f"     - {c}")
-            if recs:
-                lines.append("   Recommendations:")
-                for r in recs[:5]:
-                    lines.append(f"     - {r}")
-            if dps:
-                lines.append("   Data points:")
-                for d in dps[:5]:
-                    lines.append(f"     - {d}")
-            if ents:
-                lines.append(f"   Named: {', '.join(ents[:10])}")
-            if comps:
-                lines.append("   Comparisons:")
-                for cmp in comps[:3]:
-                    lines.append(f"     - {cmp}")
-
         lines.append("")
     return "\n".join(lines)
 
