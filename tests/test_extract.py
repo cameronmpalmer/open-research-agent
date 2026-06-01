@@ -48,11 +48,11 @@ def test_extract_and_evaluate_returns_structured_data(monkeypatch):
 
     assert extraction.summary != ""
     assert "Brilliant Cut Grinder" in extraction.summary
-    assert len(extraction.key_claims) >= 1
-    assert len(extraction.recommendations) >= 1
-    assert len(extraction.named_entities) >= 2
-    assert len(extraction.data_points) >= 1
-    assert len(extraction.comparisons) >= 1
+    assert extraction.key_claims == ["Brilliant Cut Grinder uses Aerospace 7075 Aluminum"]
+    assert extraction.recommendations == ["Buy the Brilliant Cut Grinder for $88"]
+    assert extraction.named_entities == ["Brilliant Cut Grinder", "Grinders For Life"]
+    assert extraction.data_points == ["$88", "7075 Aluminum"]
+    assert extraction.comparisons == ["Brilliant Cut vs Santa Cruz Shredder"]
     assert extraction.source_reliability == "High"
 
 
@@ -131,6 +131,62 @@ def test_extract_and_evaluate_maps_reliability_to_craap(monkeypatch):
     assert source.accuracy >= 4
 
 
+def test_extract_and_evaluate_maps_medium_reliability_to_craap(monkeypatch):
+    """Medium reliability should produce mid-range CRAAP dimension scores."""
+    monkeypatch.setattr(
+        "ora.tools.extract.get_llm",
+        lambda *a, **kw: FakeLLM({
+            "summary": "Test.",
+            "key_claims": [],
+            "recommendations": [],
+            "named_entities": [],
+            "data_points": [],
+            "comparisons": [],
+            "criticisms": [],
+            "source_reliability": "Medium",
+            "reliability_rationale": "Decent source."
+        }),
+    )
+
+    source, _ = extract_and_evaluate(
+        url="https://example.com/medium",
+        title="Medium",
+        content="Content.",
+    )
+
+    assert source.overall_reliability == "Medium"
+    assert source.authority == 3
+    assert source.relevance == 4
+
+
+def test_extract_and_evaluate_maps_low_reliability_to_craap(monkeypatch):
+    """Low reliability should produce low CRAAP dimension scores."""
+    monkeypatch.setattr(
+        "ora.tools.extract.get_llm",
+        lambda *a, **kw: FakeLLM({
+            "summary": "Test.",
+            "key_claims": [],
+            "recommendations": [],
+            "named_entities": [],
+            "data_points": [],
+            "comparisons": [],
+            "criticisms": [],
+            "source_reliability": "Low",
+            "reliability_rationale": "Biased source."
+        }),
+    )
+
+    source, _ = extract_and_evaluate(
+        url="https://example.com/low",
+        title="Low",
+        content="Content.",
+    )
+
+    assert source.overall_reliability == "Low"
+    assert source.authority == 2
+    assert source.accuracy == 2
+
+
 def test_extract_and_evaluate_handles_markdown_fences(monkeypatch):
     """JSON wrapped in ```json fences should still parse correctly."""
 
@@ -150,6 +206,28 @@ def test_extract_and_evaluate_handles_markdown_fences(monkeypatch):
     )
 
     assert extraction.summary == "test"
+    assert extraction.key_claims == ["claim 1"]
+
+
+def test_extract_and_evaluate_handles_plain_markdown_fences(monkeypatch):
+    """JSON wrapped in plain ``` fences (no language tag) should parse."""
+
+    class PlainFenceLLM:
+        class _Response:
+            def __init__(self, content='```\n{"summary": "plain", "key_claims": ["claim 1"], "recommendations": [], "named_entities": [], "data_points": [], "comparisons": [], "criticisms": [], "source_reliability": "Medium", "reliability_rationale": "ok"}\n```'):
+                self.content = content
+        def invoke(self, _prompt):
+            return self._Response()
+
+    monkeypatch.setattr("ora.tools.extract.get_llm", lambda *a, **kw: PlainFenceLLM())
+
+    _, extraction = extract_and_evaluate(
+        url="https://example.com",
+        title="Test",
+        content="Content.",
+    )
+
+    assert extraction.summary == "plain"
     assert extraction.key_claims == ["claim 1"]
 
 

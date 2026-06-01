@@ -330,3 +330,41 @@ class TestIntensityGatedExtraction:
         )
 
         assert "llm_extract" in call_log
+
+    def test_intensity_3_uses_llm_extraction(self, monkeypatch):
+        """At intensity 3 (the threshold), _scrape_and_collect should use
+        LLM extraction, not heuristic."""
+        from ora.state import Source, SourceExtraction
+        from ora.agents.researcher import _scrape_and_collect
+
+        call_log = []
+
+        def fake_extract(*args, **kwargs):
+            call_log.append("llm_extract")
+            return (
+                Source(url=kwargs.get("url", "https://example.com"), title=""),
+                SourceExtraction(summary="test summary"),
+            )
+
+        monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", fake_extract)
+        monkeypatch.setattr(
+            "ora.tools.scrape.scrape_page",
+            type("FakeTool", (), {"invoke": lambda self, _: "scraped content"})(),
+        )
+
+        _scrape_and_collect(
+            urls=["https://example.com/article"],
+            params={"urls_per_query": 1, "scrapes_per_query": 1},
+            max_content_chars=10000,
+            config=None,
+            log=[],
+            sources=[],
+            findings=[],
+            seen_urls=set(),
+            url_titles={},
+            min_sources=15,
+            query="test",
+            intensity=3,
+        )
+
+        assert "llm_extract" in call_log
