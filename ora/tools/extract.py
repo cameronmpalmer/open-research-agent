@@ -15,6 +15,8 @@ def extract_and_evaluate(
     source_type: str = "unknown",
     query: str = "",
     config: Optional[RunnableConfig] = None,
+    max_chars: int = 6000,
+    model_name: str = "",
 ) -> tuple[Source, SourceExtraction]:
     """Extract claims and evaluate reliability from a source using an LLM.
 
@@ -29,6 +31,9 @@ def extract_and_evaluate(
         source_type: Source classification (academic_paper, news, etc.).
         query: The original research query for context.
         config: Optional RunnableConfig for progress events.
+        max_chars: Maximum characters from content to use as LLM context
+            (should match intensity-level scrape budget).
+        model_name: LLM model name. If empty, loaded from config.
 
     Returns:
         A (Source, SourceExtraction) tuple. The Source contains CRAAP
@@ -37,11 +42,12 @@ def extract_and_evaluate(
     """
     from ora.progress import emit_progress
 
-    # Truncate content to a reasonable prompt budget.
-    content_budget = content[:6000]
+    # Truncate content to budget respecting intensity-level max.
+    content_budget = content[:max_chars]
 
-    settings = load_config()
-    model_name = settings.models.researcher or settings.models.default
+    if not model_name:
+        settings = load_config()
+        model_name = settings.models.researcher or settings.models.default
 
     prompt_text = EXTRACTOR_PROMPT.format(
         query=query,
@@ -97,7 +103,7 @@ def extract_and_evaluate(
     except (json.JSONDecodeError, KeyError, ValueError) as e:
         emit_progress(
             config,
-            f"Extractor: JSON parse failed for {url[:60]}, using heuristic",
+            f"Extractor: JSON parse failed for {url[:60]} ({e!r}), using heuristic",
             kind="warning",
         )
         heuristic_source = evaluate_heuristic(
