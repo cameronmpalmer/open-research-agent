@@ -168,7 +168,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     if auto_approve:
         click.echo()
     else:
-        from ora.agents.supervisor import revise_plan_text
+        from ora.agents.supervisor import revise_plan_text, _extract_search_queries
 
         while True:
             choice = click.prompt(
@@ -190,6 +190,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
                     click.echo("  Edit cancelled, plan unchanged.")
                     continue
                 plan = plan_result["research_plan"] = edited.rstrip("\n") + "\n"
+                plan_result["search_queries"] = _extract_search_queries(plan)
                 _print_markdown(plan)
             elif choice == "R":
                 feedback = click.prompt("  Feedback for supervisor")
@@ -197,6 +198,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
                     lambda: revise_plan_text(query, intensity, plan, feedback),
                     message="Revising plan...",
                 )
+                plan_result["search_queries"] = _extract_search_queries(plan)
                 _print_markdown(plan)
 
     # Phase 2: Run research pipeline
