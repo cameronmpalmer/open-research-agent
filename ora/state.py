@@ -41,6 +41,7 @@ class Finding(BaseModel):
     supporting_sources: list[str] = Field(default_factory=list)  # URLs
     contradicting_sources: list[str] = Field(default_factory=list)  # URLs
     notes: str = ""
+    extraction: Optional["SourceExtraction"] = None  # LLM extraction data (intensity 3+)
 
 
 class ReviewVerdict(BaseModel):
@@ -51,6 +52,19 @@ class ReviewVerdict(BaseModel):
     suggested: list[str] = Field(default_factory=list)
     contradicting_evidence_found: list[str] = Field(default_factory=list)
     confidence_recalibrations: dict[str, str] = Field(default_factory=dict)
+
+
+class SourceExtraction(BaseModel):
+    """LLM-extracted content and evaluation from a single source page."""
+    summary: str = ""  # 2-4 sentence summary of what this source says
+    key_claims: list[str] = Field(default_factory=list)  # Specific factual claims
+    recommendations: list[str] = Field(default_factory=list)  # Actionable recommendations
+    named_entities: list[str] = Field(default_factory=list)  # Products, brands, people
+    data_points: list[str] = Field(default_factory=list)  # Numbers, prices, statistics
+    comparisons: list[str] = Field(default_factory=list)  # X vs Y comparisons
+    criticisms: list[str] = Field(default_factory=list)  # Drawbacks, limitations mentioned
+    source_reliability: Literal["High", "Medium", "Low"] = "Medium"
+    reliability_rationale: str = ""
 
 
 class ResearchState(TypedDict, total=False):
