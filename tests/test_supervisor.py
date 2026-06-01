@@ -62,6 +62,14 @@ More text."""
 ```"""
         assert _extract_search_queries(text) == []
 
+    def test_handles_space_between_backticks_and_tag(self):
+        """LLMs sometimes insert a space: ``` search_queries (standard markdown)."""
+        text = """``` search_queries
+["query with space", "another"]
+```"""
+        result = _extract_search_queries(text)
+        assert result == ["query with space", "another"]
+
 
 def test_plan_node_sets_search_queries(monkeypatch):
     """plan_node should extract search_queries from supervisor response."""

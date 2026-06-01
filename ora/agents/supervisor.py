@@ -22,7 +22,7 @@ def _extract_search_queries(plan_text: str) -> list[str]:
 
     Returns empty list on any failure (no fence, bad JSON, wrong type).
     """
-    m = re.search(r'```search_queries\s*\n(.*?)```', plan_text, re.DOTALL)
+    m = re.search(r'```\s*search_queries\s*\n(.*?)```', plan_text, re.DOTALL)
     if not m:
         return []
 
