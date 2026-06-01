@@ -1,8 +1,10 @@
 """Supervisor agent node for LangGraph."""
+import json
+import re
 from typing import Any, Literal
 from langchain_core.runnables import RunnableConfig
 from ora.state import ResearchState
-from ora.prompts import SUPERVISOR_PLAN_PROMPT, SUPERVISOR_REVISE_PROMPT
+from ora.prompts import SUPERVISOR_PLAN_PROMPT, SUPERVISOR_REVISE_PROMPT, _search_query_count
 from ora.config import load_config, get_llm, get_supervisor_model
 
 
@@ -15,17 +17,46 @@ def _invoke_supervisor(prompt: str) -> str:
     return response.content if hasattr(response, 'content') else str(response)
 
 
+def _extract_search_queries(plan_text: str) -> list[str]:
+    """Extract JSON search queries from supervisor response code fence.
+
+    Returns empty list on any failure (no fence, bad JSON, wrong type).
+    """
+    m = re.search(r'```search_queries\s*\n(.*?)```', plan_text, re.DOTALL)
+    if not m:
+        return []
+
+    json_str = m.group(1).strip()
+
+    # Try JSON first, then Python literal eval (LLMs sometimes use single quotes)
+    try:
+        result = json.loads(json_str)
+    except (json.JSONDecodeError, ValueError):
+        try:
+            import ast
+            result = ast.literal_eval(json_str)
+        except (ValueError, SyntaxError):
+            return []
+
+    if isinstance(result, list) and all(isinstance(s, str) for s in result):
+        return result
+    return []
+
+
 def plan_node(
     state: ResearchState, config: RunnableConfig = None
 ) -> dict[str, Any]:
     """Generate a research plan for user review."""
+    intensity = state.get("intensity", 2)
     prompt = SUPERVISOR_PLAN_PROMPT.format(
         query=state.get("query", ""),
-        intensity=state.get("intensity", 2),
+        intensity=intensity,
+        count=_search_query_count(intensity),
     )
     response_text = _invoke_supervisor(prompt)
     return {
         "research_plan": response_text,
+        "search_queries": _extract_search_queries(response_text),
         "messages": [response_text],
     }
 
@@ -52,6 +83,7 @@ def revise_plan_text(
         intensity=intensity,
         plan=current_plan,
         feedback=feedback,
+        count=_search_query_count(intensity),
     )
     return _invoke_supervisor(prompt)
 
