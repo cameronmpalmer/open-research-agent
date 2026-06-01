@@ -136,7 +136,8 @@ def test_extract_and_evaluate_handles_markdown_fences(monkeypatch):
 
     class FencedLLM:
         class _Response:
-            content = '```json\n{"summary": "test", "key_claims": ["claim 1"], "recommendations": [], "named_entities": [], "data_points": [], "comparisons": [], "criticisms": [], "source_reliability": "Medium", "reliability_rationale": "ok"}\n```'
+            def __init__(self, content='```json\n{"summary": "test", "key_claims": ["claim 1"], "recommendations": [], "named_entities": [], "data_points": [], "comparisons": [], "criticisms": [], "source_reliability": "Medium", "reliability_rationale": "ok"}\n```'):
+                self.content = content
         def invoke(self, _prompt):
             return self._Response()
 
@@ -150,3 +151,37 @@ def test_extract_and_evaluate_handles_markdown_fences(monkeypatch):
 
     assert extraction.summary == "test"
     assert extraction.key_claims == ["claim 1"]
+
+
+def test_extract_and_evaluate_model_name_skips_load_config(monkeypatch):
+    """Passing model_name should skip load_config()."""
+
+    monkeypatch.setattr(
+        "ora.tools.extract.get_llm",
+        lambda *a, **kw: FakeLLM({
+            "summary": "Test.",
+            "key_claims": [],
+            "recommendations": [],
+            "named_entities": [],
+            "data_points": [],
+            "comparisons": [],
+            "criticisms": [],
+            "source_reliability": "Medium",
+            "reliability_rationale": "ok",
+        }),
+    )
+
+    # load_config should NOT be called when model_name is provided.
+    def fail_if_called(*a, **kw):
+        raise RuntimeError("load_config was called despite model_name being provided")
+
+    monkeypatch.setattr("ora.tools.extract.load_config", fail_if_called)
+
+    source, extraction = extract_and_evaluate(
+        url="https://example.com",
+        title="Test",
+        content="Content.",
+        model_name="deepseek-v4-flash",
+    )
+
+    assert source.overall_reliability == "Medium"

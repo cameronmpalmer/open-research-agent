@@ -42,9 +42,6 @@ def extract_and_evaluate(
     """
     from ora.progress import emit_progress
 
-    # Truncate content to budget respecting intensity-level max.
-    content_budget = content[:max_chars]
-
     if not model_name:
         settings = load_config()
         model_name = settings.models.researcher or settings.models.default
@@ -54,7 +51,7 @@ def extract_and_evaluate(
         title=title,
         url=url,
         source_type=source_type,
-        content=content_budget,
+        content=content,
     )
 
     try:

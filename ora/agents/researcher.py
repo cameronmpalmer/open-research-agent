@@ -301,6 +301,7 @@ def _scrape_and_collect(
     min_sources: int,
     query: str = "",
     intensity: int = 2,
+    model_name: str = "",
 ) -> bool:
     """Scrape URLs up to the per-query cap, appending to sources/findings.
 
@@ -359,6 +360,7 @@ def _scrape_and_collect(
                     query=query,
                     config=config,
                     max_chars=max_content_chars,
+                    model_name=model_name,
                 )
                 # Use the LLM-extracted summary as the claim (much richer than c[:500]).
                 claim_text = extraction.summary if extraction.summary else c[:500]
@@ -424,6 +426,7 @@ def researcher_node(
     about found sources and reviewer feedback.
     """
     settings = load_config()
+    model_name = settings.models.researcher or settings.models.default
 
     query = state.get("query", "")
     intensity = state.get("intensity", 2)
@@ -557,7 +560,7 @@ def researcher_node(
             if _scrape_and_collect(
                 urls, params, max_content_chars, config, log,
                 sources, findings, seen_urls, url_titles, min_sources=min_sources,
-                query=query, intensity=intensity,
+                query=query, intensity=intensity, model_name=model_name,
             ):
                 break
 
