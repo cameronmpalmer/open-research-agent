@@ -2,7 +2,7 @@
 import pytest
 from ora.agents import writer as writer_module
 from ora.agents.writer import writer_node
-from ora.state import Finding
+from ora.state import Finding, SourceExtraction
 
 
 class FakeResponse:
@@ -126,6 +126,39 @@ def test_format_findings_includes_dict_extraction_data():
     formatted = _format_findings_for_prompt([finding])
 
     # Dict-extracted fields should appear in the output.
+    assert "BCG uses 7075 Aluminum" in formatted
+    assert "Buy the BCG for $88" in formatted
+    assert "$88" in formatted
+    assert "Brilliant Cut Grinder" in formatted
+    assert "BCG vs Santa Cruz Shredder" in formatted
+
+
+def test_format_findings_includes_pydantic_extraction_data():
+    """Pydantic model findings with SourceExtraction should surface
+    extraction fields, not silently drop them."""
+    from ora.agents.writer import _format_findings_for_prompt
+
+    extraction = SourceExtraction(
+        summary="Best grinder recommendation",
+        key_claims=["BCG uses 7075 Aluminum", "BCG is threadless"],
+        recommendations=["Buy the BCG for $88"],
+        data_points=["$88", "3 grind plates"],
+        named_entities=["Brilliant Cut Grinder", "Grinders For Life"],
+        comparisons=["BCG vs Santa Cruz Shredder"],
+        criticisms=["Expensive"],
+        source_reliability="High",
+        reliability_rationale="Established reviewer.",
+    )
+
+    finding = Finding(
+        claim="This page recommends the Brilliant Cut Grinder.",
+        confidence="Moderate",
+        supporting_sources=["https://example.com"],
+        extraction=extraction,
+    )
+
+    formatted = _format_findings_for_prompt([finding])
+
     assert "BCG uses 7075 Aluminum" in formatted
     assert "Buy the BCG for $88" in formatted
     assert "$88" in formatted
