@@ -447,7 +447,6 @@ def researcher_node(
         if hasattr(source, "url")
     }
     log: list[str] = []
-    all_queries: list[str] = []
 
     # Dedup set: queries executed across ALL researcher invocations.
     # This prevents wasted search calls when the reviewer sends execution back.
@@ -469,7 +468,11 @@ def researcher_node(
         )
 
         if round_num == 1:
-            queries_for_round = list(generate_search_queries(query, intensity))
+            plan_queries = state.get("search_queries", [])
+            if plan_queries:
+                queries_for_round = plan_queries
+            else:
+                queries_for_round = list(generate_search_queries(query, intensity))
         else:
             # Dynamic gap queries using LLM: adapt to what's been found and
             # what the reviewer flagged. Falls back to templates on failure.
@@ -523,7 +526,6 @@ def researcher_node(
                 break
 
             executed_q_set.add(q)
-            all_queries.append(q)
             log.append(f"Search: {q}")
             emit_progress(config, f'Researcher: searching "{q}"', kind="search")
             r = web_search.invoke({"query": q})
@@ -582,7 +584,6 @@ def researcher_node(
     )
 
     return {
-        "search_queries": all_queries,
         "executed_queries": list(executed_q_set),
         "sources": sources[prior_source_count:],
         "findings": findings[prior_finding_count:],

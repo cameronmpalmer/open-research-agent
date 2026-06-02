@@ -276,7 +276,7 @@ class TestCLI:
 
         def _fake_revise(query, intensity, plan, feedback):
             revise_calls.append((query, plan, feedback))
-            return "# Revised\n\nMore on performance."
+            return "# Revised\n\nMore on performance.", []
 
         class FakePlanGraph:
             def invoke(self, state, config=None):
@@ -353,6 +353,90 @@ class TestCLI:
 
         assert result.exit_code == 0
         assert prompt_called == []  # prompt was never invoked
+
+    def test_cli_reparses_search_queries_after_edit(self, monkeypatch):
+        """After user edits plan, search_queries should be re-extracted."""
+        from ora import cli as cli_module
+
+        prompt_values = ["E", "A"]  # Edit then approve
+
+        def _fake_prompt(text, **kwargs):
+            return prompt_values.pop(0)
+
+        # Plan text with search_queries in it
+        plan_text = '# Research Plan\n\nSome topics.\n\n```search_queries\n["edit query one"]\n```'
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Original", "messages": ["# Original"]}
+
+        research_invoked = []
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                research_invoked.append(state)
+                return {"draft_report": "# Report", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr(cli_module.click, "prompt", _fake_prompt)
+        monkeypatch.setattr(cli_module.click, "edit", lambda text=None, extension=".md": plan_text)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "test query"])
+
+        assert result.exit_code == 0
+        assert len(research_invoked) == 1
+        research_state = research_invoked[0]
+        assert "search_queries" in research_state
+        assert research_state["search_queries"] == ["edit query one"]
+
+    def test_cli_reparses_search_queries_after_revise(self, monkeypatch):
+        """After supervisor revises plan, search_queries should be re-extracted."""
+        from ora import cli as cli_module
+        from ora.agents import supervisor as supervisor_module
+
+        prompt_values = ["R", "focus more on that", "A"]
+
+        def _fake_prompt(text, **kwargs):
+            return prompt_values.pop(0)
+
+        revised_plan = '# Revised Plan\n\nUpdated content.\n\n```search_queries\n["revised query a", "revised query b"]\n```'
+        original_plan = '# Original\n\n```search_queries\n["orig q1"]\n```'
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {
+                    "research_plan": original_plan,
+                    "search_queries": ["orig q1"],
+                    "messages": ["# Original"],
+                }
+
+        research_invoked = []
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                research_invoked.append(state)
+                return {"draft_report": "# Report", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr(cli_module.click, "prompt", _fake_prompt)
+        monkeypatch.setattr(supervisor_module, "revise_plan_text", lambda q, i, p, f: (revised_plan, ["revised query a", "revised query b"]))
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "test query"])
+
+        assert result.exit_code == 0
+        assert len(research_invoked) == 1
+        research_state = research_invoked[0]
+        assert research_state["search_queries"] == ["revised query a", "revised query b"]
 
     def test_hide_plan_on_autoapprove_suppresses_output(self, monkeypatch):
         from ora import cli as cli_module
