@@ -489,7 +489,7 @@ def researcher_node(
 
         # Filter out queries already executed in any prior invocation.
         fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
-        if not fresh_queries and (round_num > 1 or bool(reviewer_feedback)):
+        if not fresh_queries and (round_num > 1 or revise_round):
             # All gap queries are duplicates -- try one more LLM generation
             # with explicit instruction to avoid repeats.
             emit_progress(
@@ -506,6 +506,11 @@ def researcher_node(
                 config=config,
             )
             fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
+            if not fresh_queries:
+                # LLM regeneration produced only duplicates -- fall back
+                # to template-based gap queries as a last resort.
+                queries_for_round = generate_gap_queries(query, intensity)
+                fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
 
         if not fresh_queries:
             emit_progress(
@@ -567,6 +572,9 @@ def researcher_node(
                 query=query, intensity=intensity, model_name=model_name,
                 force_scrape=revise_round,
             ):
+                # _scrape_and_collect returns True as soon as min_sources is met,
+                # so on a REVISE round only the first query's URLs are scraped.
+                # The reviewer can issue another REVISE (up to 3 cycles) if gaps remain.
                 break
 
         if revise_round:
