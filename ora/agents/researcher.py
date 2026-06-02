@@ -457,15 +457,12 @@ def researcher_node(
 
     # Reviewer feedback for targeted gap queries.
     reviewer_feedback = _format_reviewer_feedback(state)
-    on_revise = bool(reviewer_feedback)
-    revise_round = on_revise
+    revise_round = bool(reviewer_feedback)
 
     round_num = 0
 
-    while (len(sources) < min_sources or on_revise) and round_num < max_rounds:
+    while (len(sources) < min_sources or revise_round) and round_num < max_rounds:
         round_num += 1
-        if on_revise:
-            on_revise = False  # one round then normal min_sources check
         emit_progress(
             config,
             f"Researcher: round {round_num} (have {len(sources)}, need {min_sources})",
