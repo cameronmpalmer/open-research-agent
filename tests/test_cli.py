@@ -276,7 +276,7 @@ class TestCLI:
 
         def _fake_revise(query, intensity, plan, feedback):
             revise_calls.append((query, plan, feedback))
-            return "# Revised\n\nMore on performance."
+            return "# Revised\n\nMore on performance.", []
 
         class FakePlanGraph:
             def invoke(self, state, config=None):
@@ -426,7 +426,7 @@ class TestCLI:
         monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
         monkeypatch.setattr(cli_module.click, "prompt", _fake_prompt)
-        monkeypatch.setattr(supervisor_module, "revise_plan_text", lambda q, i, p, f: revised_plan)
+        monkeypatch.setattr(supervisor_module, "revise_plan_text", lambda q, i, p, f: (revised_plan, ["revised query a", "revised query b"]))
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 

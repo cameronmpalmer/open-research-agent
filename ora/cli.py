@@ -205,12 +205,13 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
                 _print_markdown(plan)
             elif choice == "R":
                 feedback = click.prompt("  Feedback for supervisor")
-                plan = plan_result["research_plan"] = _spin(
+                plan, queries = _spin(
                     lambda: revise_plan_text(query, intensity, plan, feedback),
                     message="Revising plan...",
                 )
-                plan_result["search_queries"] = _extract_search_queries(plan)
-                if not plan_result["search_queries"] and _search_queries_fence_found(plan):
+                plan_result["research_plan"] = plan
+                plan_result["search_queries"] = queries
+                if not queries and _search_queries_fence_found(plan):
                     click.echo("  ⚠️  Supervisor search_queries block found but could not be parsed; falling back to template-generated queries")
                 _print_markdown(plan)
 

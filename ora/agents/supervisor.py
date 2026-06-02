@@ -84,7 +84,7 @@ def revise_plan_text(
     intensity: int,
     current_plan: str,
     feedback: str,
-) -> str:
+) -> tuple[str, list[str]]:
     """Revise a research plan based on user feedback.
 
     Args:
@@ -94,7 +94,7 @@ def revise_plan_text(
         feedback: Natural-language user feedback to incorporate.
 
     Returns:
-        Revised plan text in markdown.
+        Tuple of (revised plan text, extracted search queries).
     """
     prompt = SUPERVISOR_REVISE_PROMPT.format(
         query=query,
@@ -103,7 +103,8 @@ def revise_plan_text(
         feedback=feedback,
         count=_search_query_count(intensity),
     )
-    return _invoke_supervisor(prompt)
+    response = _invoke_supervisor(prompt)
+    return response, _extract_search_queries(response)
 
 
 def route_after_plan(state: ResearchState) -> Literal["researcher", "__end__"]:
