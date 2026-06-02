@@ -572,9 +572,12 @@ def researcher_node(
                 query=query, intensity=intensity, model_name=model_name,
                 force_scrape=revise_round,
             ):
-                # _scrape_and_collect returns True as soon as min_sources is met,
-                # so on a REVISE round only the first query's URLs are scraped.
-                # The reviewer can issue another REVISE (up to 3 cycles) if gaps remain.
+                # force_scrape suppresses _scrape_and_collect's internal
+                # early-return at min_sources, so all eligible URLs for this
+                # query are scraped. The function returns True because
+                # min_sources is already met, which breaks the query loop.
+                # On a REVISE round only the first query is processed;
+                # the reviewer can issue another REVISE (up to 3) if gaps remain.
                 break
 
         if revise_round:
