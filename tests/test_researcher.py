@@ -131,11 +131,10 @@ class TestResearcherUsesSearchQueries:
 class TestResearcherReviseLoop:
     def test_researcher_runs_gap_queries_on_revise(self, monkeypatch):
         """When min_sources is met but reviewer has issued REVISE,
-        the researcher should still run at least one round.
+        the researcher should run gap queries and actually collect new sources.
 
-        (Early exits for the for-loop and _scrape_and_collect prevent
-        actual source addition at >= min_sources, so we verify the
-        while loop entered by checking that query generation fired.)
+        The revise_round flag relaxes both the for-loop and _scrape_and_collect
+        gates so that sources are collected even though min_sources is already met.
         """
         from ora.agents.researcher import researcher_node
         from ora.state import ReviewVerdict
@@ -195,11 +194,9 @@ class TestResearcherReviseLoop:
 
         result = researcher_node(state)
 
-        # generate_search_queries is only called inside the while loop.
-        # If called, the while loop entered despite min_sources being met.
-        assert len(template_calls) > 0, (
-            "generate_search_queries should have been called, "
-            "indicating while loop entered despite min_sources being met"
+        new_sources = result.get("sources", [])
+        assert len(new_sources) > 0, (
+            "Expected at least one new source on REVISE round when gates are relaxed"
         )
 
     def test_revise_without_verdict_runs_normally(self, monkeypatch):

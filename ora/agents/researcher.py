@@ -302,6 +302,7 @@ def _scrape_and_collect(
     query: str = "",
     intensity: int = 2,
     model_name: str = "",
+    force_scrape: bool = False,
 ) -> bool:
     """Scrape URLs up to the per-query cap, appending to sources/findings.
 
@@ -313,7 +314,7 @@ def _scrape_and_collect(
 
     scraped_this_query = 0
     for url in urls[:params["urls_per_query"]]:
-        if len(sources) >= min_sources:
+        if len(sources) >= min_sources and not force_scrape:
             return True
 
         normalized_url = _normalize_url_for_dedupe(url)
@@ -457,6 +458,7 @@ def researcher_node(
     # Reviewer feedback for targeted gap queries.
     reviewer_feedback = _format_reviewer_feedback(state)
     on_revise = bool(reviewer_feedback)
+    revise_round = on_revise
 
     round_num = 0
 
@@ -525,7 +527,7 @@ def researcher_node(
         )
 
         for q in fresh_queries:
-            if len(sources) >= min_sources:
+            if len(sources) >= min_sources and not revise_round:
                 break
 
             executed_q_set.add(q)
@@ -566,8 +568,12 @@ def researcher_node(
                 urls, params, max_content_chars, config, log,
                 sources, findings, seen_urls, url_titles, min_sources=min_sources,
                 query=query, intensity=intensity, model_name=model_name,
+                force_scrape=revise_round,
             ):
                 break
+
+        if revise_round:
+            revise_round = False
 
     if not findings:
         results_text = web_search.invoke({"query": query})
