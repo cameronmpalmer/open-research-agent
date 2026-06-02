@@ -302,6 +302,7 @@ def _scrape_and_collect(
     query: str = "",
     intensity: int = 2,
     model_name: str = "",
+    force_scrape: bool = False,
 ) -> bool:
     """Scrape URLs up to the per-query cap, appending to sources/findings.
 
@@ -313,7 +314,7 @@ def _scrape_and_collect(
 
     scraped_this_query = 0
     for url in urls[:params["urls_per_query"]]:
-        if len(sources) >= min_sources:
+        if len(sources) >= min_sources and not force_scrape:
             return True
 
         normalized_url = _normalize_url_for_dedupe(url)
@@ -456,10 +457,11 @@ def researcher_node(
 
     # Reviewer feedback for targeted gap queries.
     reviewer_feedback = _format_reviewer_feedback(state)
+    revise_round = bool(reviewer_feedback)
 
     round_num = 0
 
-    while len(sources) < min_sources and round_num < max_rounds:
+    while (len(sources) < min_sources or revise_round) and round_num < max_rounds:
         round_num += 1
         emit_progress(
             config,
@@ -487,7 +489,7 @@ def researcher_node(
 
         # Filter out queries already executed in any prior invocation.
         fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
-        if not fresh_queries and round_num > 1:
+        if not fresh_queries and (round_num > 1 or revise_round):
             # All gap queries are duplicates -- try one more LLM generation
             # with explicit instruction to avoid repeats.
             emit_progress(
@@ -504,6 +506,11 @@ def researcher_node(
                 config=config,
             )
             fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
+            if not fresh_queries:
+                # LLM regeneration produced only duplicates -- fall back
+                # to template-based gap queries as a last resort.
+                queries_for_round = generate_gap_queries(query, intensity)
+                fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
 
         if not fresh_queries:
             emit_progress(
@@ -522,7 +529,7 @@ def researcher_node(
         )
 
         for q in fresh_queries:
-            if len(sources) >= min_sources:
+            if len(sources) >= min_sources and not revise_round:
                 break
 
             executed_q_set.add(q)
@@ -563,8 +570,18 @@ def researcher_node(
                 urls, params, max_content_chars, config, log,
                 sources, findings, seen_urls, url_titles, min_sources=min_sources,
                 query=query, intensity=intensity, model_name=model_name,
+                force_scrape=revise_round,
             ):
+                # force_scrape suppresses _scrape_and_collect's internal
+                # early-return at min_sources, so all eligible URLs for this
+                # query are scraped. The function returns True because
+                # min_sources is already met, which breaks the query loop.
+                # On a REVISE round only the first query is processed;
+                # the reviewer can issue another REVISE (up to 3) if gaps remain.
                 break
+
+        if revise_round:
+            revise_round = False
 
     if not findings:
         results_text = web_search.invoke({"query": query})
