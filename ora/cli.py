@@ -120,7 +120,7 @@ def main():
 @click.option("--no-save", is_flag=True,
               help="Do not save to file; print to stdout only")
 @click.option("--model", "-m", default=None,
-              help="LLM model for researcher/writer (e.g., openai:gpt-4.1)")
+              help="LLM model for researcher/writer (e.g., deepseek-v4-flash)")
 @click.option("--reviewer-model", "-r", default=None,
               help="LLM model for adversarial reviewer")
 @click.option("--max-revisions", type=int, default=3,
