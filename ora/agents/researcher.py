@@ -456,11 +456,14 @@ def researcher_node(
 
     # Reviewer feedback for targeted gap queries.
     reviewer_feedback = _format_reviewer_feedback(state)
+    on_revise = bool(reviewer_feedback)
 
     round_num = 0
 
-    while len(sources) < min_sources and round_num < max_rounds:
+    while (len(sources) < min_sources or on_revise) and round_num < max_rounds:
         round_num += 1
+        if on_revise:
+            on_revise = False  # one round then normal min_sources check
         emit_progress(
             config,
             f"Researcher: round {round_num} (have {len(sources)}, need {min_sources})",
@@ -487,7 +490,7 @@ def researcher_node(
 
         # Filter out queries already executed in any prior invocation.
         fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
-        if not fresh_queries and round_num > 1:
+        if not fresh_queries and (round_num > 1 or bool(reviewer_feedback)):
             # All gap queries are duplicates -- try one more LLM generation
             # with explicit instruction to avoid repeats.
             emit_progress(

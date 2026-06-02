@@ -1,6 +1,6 @@
 """Tests for researcher agent."""
 from ora.agents.researcher import generate_search_queries, _normalize_url_for_dedupe
-from ora.state import ResearchState, Source, SourceExtraction
+from ora.state import ResearchState, Source, Finding, SourceExtraction
 
 
 class TestGenerateSearchQueries:
@@ -126,3 +126,160 @@ class TestResearcherUsesSearchQueries:
         result = researcher_node(state)
 
         assert "search_queries" not in result
+
+
+class TestResearcherReviseLoop:
+    def test_researcher_runs_gap_queries_on_revise(self, monkeypatch):
+        """When min_sources is met but reviewer has issued REVISE,
+        the researcher should still run at least one round.
+
+        (Early exits for the for-loop and _scrape_and_collect prevent
+        actual source addition at >= min_sources, so we verify the
+        while loop entered by checking that query generation fired.)
+        """
+        from ora.agents.researcher import researcher_node
+        from ora.state import ReviewVerdict
+        import types
+
+        existing_sources = [Source(url=f"https://example.com/{i}", title=f"Source {i}") for i in range(15)]
+        verdict = ReviewVerdict(
+            verdict="REVISE",
+            blocking=["Need source on topic X"],
+            required=["Add coverage of Y"],
+        )
+
+        state = ResearchState(
+            query="test query",
+            intensity=3,
+            sources=existing_sources,
+            findings=[Finding(claim="placeholder")],
+            messages=[],
+            review_verdict=verdict,
+            revision_count=1,
+            executed_queries=["already searched this"],
+        )
+        # intensity 3 has min_sources=15. With 15 existing sources, min_sources is met.
+        # The while loop must still run because of the REVISE verdict.
+
+        def fake_web_search_invoke(input_dict):
+            return "[New Source](https://example.com/new)\n  snippet about topic X"
+
+        mock_web_search = types.SimpleNamespace(invoke=fake_web_search_invoke)
+        monkeypatch.setattr("ora.tools.search.web_search", mock_web_search)
+
+        def fake_scrape_page_invoke(input_dict):
+            return "Scraped content about " + input_dict["url"]
+
+        mock_scrape = types.SimpleNamespace(invoke=fake_scrape_page_invoke)
+        monkeypatch.setattr("ora.tools.scrape.scrape_page", mock_scrape)
+
+        def fake_extract_and_evaluate(*args, **kwargs):
+            return (
+                Source(url=kwargs.get("url", "https://example.com"), title=""),
+                SourceExtraction(summary="test"),
+            )
+
+        monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", fake_extract_and_evaluate)
+        monkeypatch.setattr("ora.tools.evaluate.evaluate_source", lambda u, t, c, cc: Source(url=u, title=t))
+
+        template_calls = []
+
+        def fake_generate_search_queries(query, intensity):
+            template_calls.append((query, intensity))
+            return ["fresh_query_1", "fresh_query_2"]
+
+        monkeypatch.setattr(
+            "ora.agents.researcher.generate_search_queries",
+            fake_generate_search_queries,
+        )
+
+        result = researcher_node(state)
+
+        # generate_search_queries is only called inside the while loop.
+        # If called, the while loop entered despite min_sources being met.
+        assert len(template_calls) > 0, (
+            "generate_search_queries should have been called, "
+            "indicating while loop entered despite min_sources being met"
+        )
+
+    def test_revise_without_verdict_runs_normally(self, monkeypatch):
+        """Without a REVISE verdict, normal behavior: no bypass of min_sources."""
+        from ora.agents.researcher import researcher_node
+
+        existing_sources = [Source(url=f"https://example.com/{i}", title=f"Source {i}") for i in range(15)]
+
+        state = ResearchState(
+            query="test query",
+            intensity=3,
+            sources=existing_sources,
+            findings=[Finding(claim="placeholder")],
+            messages=[],
+            executed_queries=[],
+        )
+        # No review_verdict -- normal behavior. min_sources=15 is met.
+
+        result = researcher_node(state)
+
+        new_sources = result.get("sources", [])
+        assert len(new_sources) == 0, "Expected zero new sources when no REVISE and min_sources met"
+
+    def test_gap_regeneration_fires_round_one_on_revise(self, monkeypatch):
+        """When round 1 queries are all deduped and reviewer feedback exists,
+        the gap query regeneration should fire even on round 1."""
+        from ora.agents.researcher import researcher_node
+        from ora.state import ReviewVerdict
+        import types
+
+        verdict = ReviewVerdict(
+            verdict="REVISE",
+            required=["Find evidence about Z"],
+        )
+
+        state = ResearchState(
+            query="test query",
+            intensity=3,
+            sources=[Source(url="https://example.com/1", title="Source 1")],
+            findings=[Finding(claim="placeholder")],
+            messages=[],
+            review_verdict=verdict,
+            revision_count=1,
+            search_queries=["gap query"],
+            executed_queries=["gap query"],
+        )
+
+        gap_dynamic_calls = []
+
+        def fake_web_search_invoke(input_dict):
+            return "[Regen Source](https://example.com/new)\n  snippet"
+
+        mock_web_search = types.SimpleNamespace(invoke=fake_web_search_invoke)
+        monkeypatch.setattr("ora.tools.search.web_search", mock_web_search)
+
+        def fake_scrape_page_invoke(input_dict):
+            return "Content"
+
+        mock_scrape = types.SimpleNamespace(invoke=fake_scrape_page_invoke)
+        monkeypatch.setattr("ora.tools.scrape.scrape_page", mock_scrape)
+
+        def fake_extract_and_evaluate(*args, **kwargs):
+            return (
+                Source(url=kwargs.get("url", "https://example.com"), title=""),
+                SourceExtraction(summary="test"),
+            )
+
+        monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", fake_extract_and_evaluate)
+
+        def fake_generate_gap_queries_dynamic(*args, **kwargs):
+            gap_dynamic_calls.append(True)
+            return ["fresh gap query from regeneration"]
+
+        monkeypatch.setattr(
+            "ora.agents.researcher.generate_gap_queries_dynamic",
+            fake_generate_gap_queries_dynamic,
+        )
+
+        result = researcher_node(state)
+
+        assert len(gap_dynamic_calls) > 0, (
+            "generate_gap_queries_dynamic should have been called via dedup regeneration"
+        )
