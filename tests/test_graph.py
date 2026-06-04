@@ -1,11 +1,21 @@
 """Tests for graph assembly and routing."""
-from ora.graph import build_graph
+from ora.graph import build_graph, build_research_graph
 from ora.state import ResearchState, ReviewVerdict
 
 
 class TestGraphAssembly:
     def test_graph_builds_without_error(self):
         graph = build_graph()
+        assert graph is not None
+
+    def test_no_review_skips_reviewer_at_high_intensity(self):
+        """With no_review=True, graph should compile even at intensity 4."""
+        graph = build_research_graph(intensity=4, no_review=True)
+        assert graph is not None
+
+    def test_no_review_is_noop_at_low_intensity(self):
+        """no_review=True at intensity 1 should compile (no reviewer anyway)."""
+        graph = build_research_graph(intensity=1, no_review=True)
         assert graph is not None
 
     def test_graph_accepts_initial_state(self):
