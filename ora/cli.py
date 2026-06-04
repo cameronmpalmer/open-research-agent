@@ -99,7 +99,7 @@ def _print_progress_event(event: dict) -> None:
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="ora")
+@click.version_option(version="0.2.0", prog_name="ora")
 def main():
     """Open Research Agent (ORA) - Multi-agent research with adversarial review.
 
