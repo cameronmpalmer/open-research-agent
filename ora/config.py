@@ -123,6 +123,14 @@ def get_llm(model_name: str, temperature: float = 0.0):
         )
 
     clean_name = model_name.split(":", 1)[-1] if ":" in model_name else model_name
+    if clean_name != model_name:
+        import warnings
+        warnings.warn(
+            f"Model name '{model_name}' contains a provider prefix which is"
+            f" ignored (ORA connects to the configured base URL, currently"
+            f" {settings.deepseek_base_url}). Using '{clean_name}' instead.",
+            stacklevel=2,
+        )
     return ChatOpenAI(
         model=clean_name,
         temperature=temperature,

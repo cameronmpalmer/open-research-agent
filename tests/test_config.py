@@ -1,7 +1,8 @@
 """Tests for configuration loading."""
 import os
 import tempfile
-from ora.config import load_config, ORASettings, get_researcher_model, get_reviewer_model, get_supervisor_model
+import pytest
+from ora.config import load_config, ORASettings, get_researcher_model, get_reviewer_model, get_supervisor_model, get_llm
 
 
 class TestORASettings:
@@ -50,3 +51,20 @@ class TestLoadConfig:
     def test_get_supervisor_model_defaults_to_v4_pro(self):
         settings = ORASettings()
         assert get_supervisor_model(settings) == "deepseek-v4-pro"
+
+
+class TestGetLlmWarning:
+    def test_warns_on_colon_prefix(self, monkeypatch):
+        """get_llm should warn when model name contains a provider:prefix."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        with pytest.warns(UserWarning, match="provider prefix"):
+            get_llm("openai:gpt-4.1")
+
+    def test_no_warn_without_prefix(self, monkeypatch):
+        """get_llm should not warn for bare model names."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        import warnings
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            get_llm("deepseek-v4-flash")
+        assert len(record) == 0, f"Unexpected warnings: {[str(w.message) for w in record]}"
