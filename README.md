@@ -2,7 +2,7 @@
 
 Open Research Agent (ORA) is an open-source multi-agent research CLI. ORA plans research, searches and scrapes web sources, synthesizes findings, and optionally uses an adversarial reviewer for higher-intensity research.
 
-Current release: **0.1.0**
+Current release: **0.2.0**
 
 ## What ORA does
 
@@ -10,12 +10,13 @@ ORA turns a research question into a sourced markdown report:
 
 1. A supervisor drafts a research plan.
 2. The researcher searches and scrapes web sources.
-3. The writer synthesizes findings into a report.
-4. For intensity levels 3 and above, an adversarial reviewer audits the draft.
+3. At intensity 3+, an LLM extraction layer pulls key claims, data, and entities from each source.
+4. The writer synthesizes findings into a report.
+5. For intensity levels 3 and above, an adversarial reviewer audits the draft.
 
 ## Current backend support
 
-ORA 0.1.0 currently supports one LLM backend:
+ORA 0.2.0 currently supports one LLM backend:
 
 - **LLM backend:** DeepSeek API
 - **Search and scraping backend:** Firecrawl
@@ -137,6 +138,8 @@ By default, `open-research-agent research` saves a timestamped markdown report i
 Use `--output` to choose a specific path, or `--no-save` to print the report without writing a file.
 
 ## Development
+
+ORA requires **Python 3.10**. Later versions (3.11+) may encounter incompatibilities with the LangChain/LangGraph ecosystem.
 
 Install development dependencies:
 
