@@ -217,7 +217,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
 
     # Phase 2: Run research pipeline
     click.echo()
-    research_graph = build_research_graph(intensity=intensity)
+    research_graph = build_research_graph(intensity=intensity, no_review=no_review)
     plan_result["plan_approved"] = True
     if quiet:
         final_state = _spin(lambda: research_graph.invoke(plan_result), message="Researching...")
