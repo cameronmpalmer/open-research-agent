@@ -67,22 +67,77 @@ class TestLoadConfig:
         assert get_supervisor_model(settings) == "deepseek-v4-pro"
 
 
-class TestGetLlmWarning:
-    def test_warns_on_colon_prefix(self, monkeypatch):
-        """get_llm should warn when model name contains a provider:prefix."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-        with pytest.warns(UserWarning, match="provider prefix"):
+class FakeChatOpenAI:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+
+class TestGetLlmRouting:
+    def _capture_chat_openai(self, monkeypatch):
+        captures = {}
+
+        def factory(**kwargs):
+            captures.update(kwargs)
+            return FakeChatOpenAI(**kwargs)
+
+        # get_llm imports ChatOpenAI locally from langchain_openai, so patch
+        # the class there (ora.config has no module-level ChatOpenAI attribute).
+        monkeypatch.setattr("langchain_openai.ChatOpenAI", factory)
+        return captures
+
+    def test_no_prefix_uses_default_provider_deepseek(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
+        captures = self._capture_chat_openai(monkeypatch)
+        get_llm("deepseek-v4-flash")
+        assert captures["model"] == "deepseek-v4-flash"
+        assert captures["base_url"] == "https://api.deepseek.com"
+        assert captures["api_key"] == "sk-deepseek"
+        assert captures["default_headers"] is None
+
+    def test_openrouter_prefix_routes_to_openrouter(self, monkeypatch):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or")
+        captures = self._capture_chat_openai(monkeypatch)
+        get_llm("openrouter:anthropic/claude-3.5-sonnet")
+        assert captures["model"] == "anthropic/claude-3.5-sonnet"
+        assert captures["base_url"] == "https://openrouter.ai/api/v1"
+        assert captures["api_key"] == "sk-or"
+        assert captures["default_headers"]["X-Title"] == "ORA"
+
+    def test_unknown_provider_warns_and_falls_back(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek")
+        captures = self._capture_chat_openai(monkeypatch)
+        with pytest.warns(UserWarning, match="Unknown provider"):
             get_llm("openai:gpt-4.1")
+        assert captures["model"] == "openai:gpt-4.1"  # prefix kept for unknown providers
+        assert captures["base_url"] == "https://api.deepseek.com"
 
-    def test_no_warn_without_prefix(self, monkeypatch):
-        """get_llm should not warn for bare model names."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-        import warnings
-
-        with warnings.catch_warnings(record=True) as record:
-            warnings.simplefilter("always")
+    def test_missing_key_raises_value_error(self, monkeypatch):
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="deepseek"):
             get_llm("deepseek-v4-flash")
-        assert len(record) == 0, f"Unexpected warnings: {[str(w.message) for w in record]}"
+
+    def test_deepseek_falls_back_to_openai_key(self, monkeypatch):
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-legacy")
+        captures = self._capture_chat_openai(monkeypatch)
+        get_llm("deepseek-v4-flash")
+        assert captures["api_key"] == "sk-openai-legacy"
+
+
+class TestSplitProvider:
+    def test_no_prefix(self):
+        from ora.config import _split_provider
+
+        assert _split_provider("deepseek-v4-flash") == (None, "deepseek-v4-flash")
+
+    def test_openrouter_prefix_with_slashes(self):
+        from ora.config import _split_provider
+
+        assert _split_provider("openrouter:anthropic/claude-3.5-sonnet") == (
+            "openrouter",
+            "anthropic/claude-3.5-sonnet",
+        )
 
 
 class TestProviders:

@@ -130,6 +130,41 @@ def get_reviewer_model(settings: ORASettings) -> str:
     return settings.models.reviewer or "deepseek-v4-pro"
 
 
+def _split_provider(model_name: str) -> tuple[str | None, str]:
+    """Split a model name into (provider, model). No colon -> (None, name)."""
+    if ":" in model_name:
+        provider, _, rest = model_name.partition(":")
+        return provider, rest
+    return None, model_name
+
+
+def _resolve_provider(settings: ORASettings, name: str) -> ProviderSettings | None:
+    """Effective provider settings: user config merged over built-in defaults.
+
+    Returns None for unknown providers. The legacy deepseek_base_url field
+    (YAML or ORA_DEEPSEEK_BASE_URL env) applies when the user has not
+    explicitly configured providers.deepseek.
+    """
+    defaults = DEFAULT_PROVIDERS.get(name)
+    if defaults is None and name not in settings.providers:
+        return None
+    merged = ProviderSettings()
+    if defaults is not None:
+        merged.base_url = defaults.base_url
+        merged.api_key_env = defaults.api_key_env
+        merged.headers = dict(defaults.headers)
+    user = settings.providers.get(name)
+    if user is not None:
+        if user.base_url:
+            merged.base_url = user.base_url
+        if user.api_key_env:
+            merged.api_key_env = user.api_key_env
+        merged.headers.update(user.headers)
+    if name == "deepseek" and name not in settings.providers and settings.deepseek_base_url:
+        merged.base_url = settings.deepseek_base_url
+    return merged
+
+
 def get_firecrawl_client():
     """Get a configured FirecrawlApp instance.
 
@@ -146,31 +181,49 @@ def get_firecrawl_client():
 
 
 def get_llm(model_name: str, temperature: float = 0.0):
-    """Get a DeepSeek-configured ChatOpenAI instance.
+    """Get a ChatOpenAI instance routed to the right provider.
 
-    Uses DEEPSEEK_API_KEY with fallback to OPENAI_API_KEY.
-    Raises ValueError if no API key is configured.
+    A `provider:model` prefix (e.g. `openrouter:anthropic/claude-3.5-sonnet`)
+    selects the provider; without a prefix, the default provider is used.
+    An unknown provider prefix warns and falls back to the default provider.
+    Raises ValueError if the resolved provider has no API key configured.
     """
     from langchain_openai import ChatOpenAI
 
     settings = load_config()
-    api_key = os.environ.get("DEEPSEEK_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
-    if not api_key:
-        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY or OPENAI_API_KEY.")
+    provider_name, clean_name = _split_provider(model_name)
 
-    clean_name = model_name.split(":", 1)[-1] if ":" in model_name else model_name
-    if clean_name != model_name:
+    if provider_name is None:
+        provider_name = settings.provider.default or "deepseek"
+        clean_name = model_name
+    elif _resolve_provider(settings, provider_name) is None:
         import warnings
 
         warnings.warn(
-            f"Model name '{model_name}' contains a provider prefix which is"
-            f" ignored (ORA connects to the configured base URL, currently"
-            f" {settings.deepseek_base_url}). Using '{clean_name}' instead.",
+            f"Unknown provider '{provider_name}' in model name '{model_name}'; "
+            f"falling back to default provider '{settings.provider.default or 'deepseek'}'.",
             stacklevel=2,
         )
+        provider_name = settings.provider.default or "deepseek"
+        clean_name = model_name  # keep the full name; prefix not stripped
+
+    provider = _resolve_provider(settings, provider_name)
+    if provider is None:
+        raise ValueError(
+            f"Unknown default provider '{provider_name}'. Check the 'provider.default' setting."
+        )
+
+    api_key = os.environ.get(provider.api_key_env or "", "")
+    if not api_key and provider_name == "deepseek":
+        api_key = os.environ.get("OPENAI_API_KEY", "")  # legacy fallback
+    if not api_key:
+        env_hint = provider.api_key_env or "the provider's api_key_env var"
+        raise ValueError(f"No API key for provider '{provider_name}'. Set {env_hint}.")
+
     return ChatOpenAI(
         model=clean_name,
         temperature=temperature,
-        base_url=settings.deepseek_base_url,
+        base_url=provider.base_url,
         api_key=api_key,
+        default_headers=provider.headers or None,
     )
