@@ -16,12 +16,12 @@ ORA turns a research question into a sourced markdown report:
 
 ## Current backend support
 
-ORA 0.2.0 currently supports one LLM backend:
+ORA 0.2.0 supports two LLM backends:
 
-- **LLM backend:** DeepSeek API
-- **Search and scraping backend:** Firecrawl
+- **DeepSeek API** (default) — models like `deepseek-v4-flash` and `deepseek-v4-pro`
+- **OpenRouter** — OpenAI-compatible gateway to many models, e.g. `anthropic/claude-3.5-sonnet` via `openrouter:anthropic/claude-3.5-sonnet`
 
-The default model names are `deepseek-v4-flash` for research and writing, and `deepseek-v4-pro` for planning and review. Other LLM backends are not currently supported.
+Search and scraping use **Firecrawl**.
 
 ## Installation
 
@@ -50,6 +50,7 @@ Set the required API keys:
 ```bash
 export DEEPSEEK_API_KEY="your-deepseek-api-key"
 export FIRECRAWL_API_KEY="your-firecrawl-api-key"
+export OPENROUTER_API_KEY="your-openrouter-api-key"
 ```
 
 Create a default config file:
@@ -69,6 +70,38 @@ The config file is stored at:
 ```text
 ~/.ora/config.yaml
 ```
+
+## Using a provider prefix
+
+Any model name can carry a `provider:model` prefix to select the backend:
+
+```bash
+open-research-agent research "..." --model openrouter:anthropic/claude-3.5-sonnet
+```
+
+Without a prefix, calls use the default provider (`deepseek` by default). The
+default can be changed in `config.yaml` under `provider.default`. Each provider
+reads its API key from the environment variable named in its `api_key_env`
+(`DEEPSEEK_API_KEY` for deepseek, `OPENROUTER_API_KEY` for openrouter), and can
+be configured under `providers:` in `config.yaml`:
+
+```yaml
+provider:
+  default: deepseek
+providers:
+  deepseek:
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    headers:
+      HTTP-Referer: https://github.com/cameronmpalmer/open-research-agent
+      X-Title: ORA
+```
+
+The legacy top-level `deepseek_base_url` key is still honored when no
+`providers:` section exists.
 
 ## Quick start
 
