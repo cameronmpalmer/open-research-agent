@@ -43,6 +43,8 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-mock>=3.14",
+    "ruff>=0.16",
+    "build>=1.0",
 ]
 
 [project.scripts]
@@ -57,3 +59,12 @@ testpaths = ["tests"]
 filterwarnings = [
     "ignore::langchain_core._api.deprecation.LangChainPendingDeprecationWarning",
 ]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# Naive local timestamps are intentional for report filenames (cli.py)
+# and report header dates (writer.py).
+ignore = ["DTZ005", "DTZ011"]
