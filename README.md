@@ -18,8 +18,8 @@ ORA turns a research question into a sourced markdown report:
 
 ORA 0.2.0 supports two LLM backends:
 
-- **DeepSeek API** (default) — models like `deepseek-v4-flash` and `deepseek-v4-pro`
-- **OpenRouter** — OpenAI-compatible gateway to many models, e.g. `anthropic/claude-3.5-sonnet` via `openrouter:anthropic/claude-3.5-sonnet`
+- **DeepSeek API** (default), models like `deepseek-v4-flash` and `deepseek-v4-pro`
+- **OpenRouter**, an OpenAI-compatible gateway to many models, e.g. `anthropic/claude-3.5-sonnet` via `openrouter:anthropic/claude-3.5-sonnet`
 
 Search and scraping use **Firecrawl**.
 
