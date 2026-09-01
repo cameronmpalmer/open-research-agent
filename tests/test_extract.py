@@ -1,7 +1,7 @@
 """Tests for per-source LLM extraction."""
 import json
+
 from ora.tools.extract import extract_and_evaluate
-from ora.state import SourceExtraction
 
 
 class FakeLLM:
@@ -255,7 +255,7 @@ def test_extract_and_evaluate_model_name_skips_load_config(monkeypatch):
 
     monkeypatch.setattr("ora.tools.extract.load_config", fail_if_called)
 
-    source, extraction = extract_and_evaluate(
+    source, _ = extract_and_evaluate(
         url="https://example.com",
         title="Test",
         content="Content.",

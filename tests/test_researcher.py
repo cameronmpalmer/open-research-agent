@@ -1,6 +1,6 @@
 """Tests for researcher agent."""
-from ora.agents.researcher import generate_search_queries, _normalize_url_for_dedupe
-from ora.state import ResearchState, Source, Finding, SourceExtraction
+from ora.agents.researcher import _normalize_url_for_dedupe, generate_search_queries
+from ora.state import Finding, ResearchState, Source, SourceExtraction
 
 
 class TestGenerateSearchQueries:
@@ -84,14 +84,15 @@ class TestResearcherUsesSearchQueries:
         )
         state["search_queries"] = ["plan query one", "plan query two"]
 
-        result = researcher_node(state)
+        researcher_node(state)
 
         assert len(template_calls) == 0
 
     def test_researcher_does_not_overwrite_search_queries(self, monkeypatch):
         """Researcher return dict must not include search_queries key."""
-        from ora.agents.researcher import researcher_node
         import types
+
+        from ora.agents.researcher import researcher_node
 
         def fake_web_search_invoke(input_dict):
             return "[Test](https://example.com/t1)\n  snippet"
@@ -136,9 +137,10 @@ class TestResearcherReviseLoop:
         The revise_round flag relaxes both the for-loop and _scrape_and_collect
         gates so that sources are collected even though min_sources is already met.
         """
+        import types
+
         from ora.agents.researcher import researcher_node
         from ora.state import ReviewVerdict
-        import types
 
         existing_sources = [Source(url=f"https://example.com/{i}", title=f"Source {i}") for i in range(15)]
         verdict = ReviewVerdict(
@@ -223,9 +225,10 @@ class TestResearcherReviseLoop:
     def test_gap_regeneration_fires_round_one_on_revise(self, monkeypatch):
         """When round 1 queries are all deduped and reviewer feedback exists,
         the gap query regeneration should fire even on round 1."""
+        import types
+
         from ora.agents.researcher import researcher_node
         from ora.state import ReviewVerdict
-        import types
 
         verdict = ReviewVerdict(
             verdict="REVISE",
@@ -275,7 +278,7 @@ class TestResearcherReviseLoop:
             fake_generate_gap_queries_dynamic,
         )
 
-        result = researcher_node(state)
+        researcher_node(state)
 
         assert len(gap_dynamic_calls) > 0, (
             "generate_gap_queries_dynamic should have been called via dedup regeneration"

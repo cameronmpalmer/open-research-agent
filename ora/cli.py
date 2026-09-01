@@ -7,6 +7,7 @@ from datetime import datetime
 
 import click
 import yaml
+
 from ora.config import get_researcher_model, load_config
 
 logging.captureWarnings(True)
@@ -32,9 +33,9 @@ def _spin(func, message="Working..."):
     The status message cycles its trailing dots (., .., ...) while
     the function runs in a background thread.
     """
-    from rich.console import Console
     import threading
-    import time
+
+    from rich.console import Console
 
     base = message.rstrip(".")
 
@@ -46,7 +47,7 @@ def _spin(func, message="Working..."):
         nonlocal result, exception
         try:
             result = func()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             exception = exc
         finally:
             done.set()
@@ -106,7 +107,6 @@ def main():
     Submit a query, get back calibrated, source-traced research that
     has been audited by a separate adversarial agent.
     """
-    pass
 
 
 @main.command()
@@ -177,7 +177,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     if auto_approve:
         click.echo()
     else:
-        from ora.agents.supervisor import revise_plan_text, _extract_search_queries
+        from ora.agents.supervisor import _extract_search_queries, revise_plan_text
 
         while True:
             choice = click.prompt(
@@ -206,7 +206,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
             elif choice == "R":
                 feedback = click.prompt("  Feedback for supervisor")
                 plan, queries = _spin(
-                    lambda: revise_plan_text(query, intensity, plan, feedback),
+                    lambda plan=plan, feedback=feedback: revise_plan_text(query, intensity, plan, feedback),
                     message="Revising plan...",
                 )
                 plan_result["research_plan"] = plan
@@ -284,11 +284,10 @@ def config(show, init):
     """Show or initialize ORA configuration."""
     config_path = os.path.expanduser("~/.ora/config.yaml")
 
-    if init:
-        if os.path.exists(config_path):
-            if not click.confirm(f"Config already exists at {config_path}. Overwrite?", prompt_suffix=" [y/n]: "):
-                click.echo("Aborted.")
-                return
+    if init and os.path.exists(config_path):
+        if not click.confirm(f"Config already exists at {config_path}. Overwrite?", prompt_suffix=" [y/n]: "):
+            click.echo("Aborted.")
+            return
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
         default_config = {
             "models": {

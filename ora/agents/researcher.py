@@ -1,12 +1,14 @@
 """Researcher agent node for LangGraph."""
 import re
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
+
 from langchain_core.runnables import RunnableConfig
-from ora.state import ResearchState, Source, Finding
-from ora.config import load_config, get_llm
+
+from ora.config import get_llm, load_config
 from ora.progress import emit_progress
 from ora.prompts import GAP_QUERY_PROMPT
+from ora.state import Finding, ResearchState, Source
 
 # Domains known to block or heavily rate-limit automated scraping.
 # The researcher will skip these and try other results instead.
@@ -43,7 +45,7 @@ def _should_skip_url(url: str) -> bool:
     """Return True if the URL's domain is known to block automated scraping."""
     try:
         domain = urlparse(url).netloc.lower()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
     return domain in SKIP_DOMAINS
 
@@ -52,7 +54,7 @@ def _normalize_url_for_dedupe(url: str) -> str:
     """Normalize URL enough to avoid duplicate source entries."""
     try:
         parsed = urlparse(url)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return url.rstrip("/")
 
     path = parsed.path.rstrip("/")
@@ -218,7 +220,7 @@ def generate_gap_queries_dynamic(
     sources: list[Source],
     reviewer_feedback: str,
     executed_queries: set[str],
-    config: Optional[RunnableConfig] = None,
+    config: RunnableConfig | None = None,
 ) -> list[str]:
     """Generate adaptive gap queries using the LLM.
 
@@ -261,7 +263,7 @@ def generate_gap_queries_dynamic(
         )
         response = llm.invoke(prompt_text)
         text = response.content if hasattr(response, 'content') else str(response)
-    except Exception:
+    except Exception:  # noqa: BLE001
         # Fall back to template queries if LLM call fails.
         emit_progress(config, "Researcher: gap query LLM failed, using templates", kind="warning")
         return generate_gap_queries(query, intensity)
@@ -291,7 +293,7 @@ def _scrape_and_collect(
     urls: list[str],
     params: dict,
     max_content_chars: int,
-    config: Optional[RunnableConfig],
+    config: RunnableConfig | None,
     log: list[str],
     sources: list,
     findings: list,
@@ -309,8 +311,8 @@ def _scrape_and_collect(
     Returns True if we've hit the overall min_sources target and the caller
     should stop further work.
     """
-    from ora.tools.scrape import scrape_page
     from ora.tools.evaluate import evaluate_source
+    from ora.tools.scrape import scrape_page
 
     scraped_this_query = 0
     for url in urls[:params["urls_per_query"]]:
@@ -333,11 +335,7 @@ def _scrape_and_collect(
         display_url = url.replace("https://", "").replace("http://", "")[:80]
         emit_progress(config, f"Researcher: scraping {display_url}", kind="scrape")
         c = scrape_page.invoke({"url": url})
-        is_error = (
-            c.startswith("Scrape error") or
-            c.startswith("Scrape failed") or
-            c.startswith("No content extracted")
-        )
+        is_error = c.startswith(("Scrape error", "Scrape failed", "No content extracted"))
         log.append(f"  Scraped: {len(c)} chars from {url[:60]} {'(FAIL)' if is_error else ''}")
         if is_error:
             emit_progress(config, f"Researcher: scrape failed for {display_url}", kind="error")
@@ -378,7 +376,7 @@ def _scrape_and_collect(
                 )
                 extraction = None
                 claim_text = c[:500]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log.append(f"  Source eval failed from {url[:60]}: {e}")
             emit_progress(config, f"Researcher: source evaluation failed for {display_url}", kind="error")
             source = Source(
@@ -416,7 +414,7 @@ def _scrape_and_collect(
 
 
 def researcher_node(
-    state: ResearchState, config: Optional[RunnableConfig] = None
+    state: ResearchState, config: RunnableConfig | None = None
 ) -> dict[str, Any]:
     """Researcher: iterate until min_sources target is reached.
 
@@ -537,7 +535,7 @@ def researcher_node(
             emit_progress(config, f'Researcher: searching "{q}"', kind="search")
             r = web_search.invoke({"query": q})
             log.append(f"  Result: {len(r)} chars")
-            search_failed = r.startswith("Search error") or r.startswith("Search failed")
+            search_failed = r.startswith(("Search error", "Search failed"))
             if search_failed:
                 emit_progress(config, f'Researcher: search failed for "{q}"', kind="error")
 

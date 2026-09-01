@@ -1,5 +1,6 @@
 """Core state types for the ORA research graph."""
-from typing import TypedDict, Literal, Optional, Annotated, Any
+from typing import Annotated, Literal, Optional, TypedDict
+
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
@@ -19,7 +20,7 @@ class Source(BaseModel):
     """An evaluated research source."""
     url: str
     title: str
-    publication_date: Optional[str] = None
+    publication_date: str | None = None
     source_type: Literal[
         "academic_paper", "official_doc", "news", "blog",
         "forum", "social_media", "unknown"

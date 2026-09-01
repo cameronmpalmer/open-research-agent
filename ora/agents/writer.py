@@ -1,11 +1,13 @@
 """Writer agent node for LangGraph."""
 from datetime import date
-from typing import Any, Optional
+from typing import Any
+
 from langchain_core.runnables import RunnableConfig
-from ora.state import ResearchState
-from ora.prompts import WRITER_PROMPT
-from ora.config import load_config, get_researcher_model, get_llm
+
+from ora.config import get_llm, get_researcher_model, load_config
 from ora.progress import emit_progress
+from ora.prompts import WRITER_PROMPT
+from ora.state import ResearchState
 
 
 def _format_findings_for_prompt(findings: list) -> str:
@@ -118,7 +120,7 @@ def _build_bibliography(sources: list) -> str:
 
 
 def writer_node(
-    state: ResearchState, config: Optional[RunnableConfig] = None
+    state: ResearchState, config: RunnableConfig | None = None
 ) -> dict[str, Any]:
     """Writer LangGraph node. Synthesizes findings into a structured report.
 

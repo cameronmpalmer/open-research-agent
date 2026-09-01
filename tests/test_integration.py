@@ -21,8 +21,9 @@ class TestFullPipeline:
 
     def test_reviewer_blocks_broken_urls(self):
         """Adversarial reviewer should catch broken URLs."""
-        from ora.agents.reviewer import parse_reviewer_output
         import json
+
+        from ora.agents.reviewer import parse_reviewer_output
         output = json.dumps({
             "verdict": "REVISE",
             "blocking": ["URL https://example.com/fake returns 404"],
@@ -38,8 +39,9 @@ class TestFullPipeline:
 
     def test_reviewer_passes_clean_report(self):
         """Adversarial reviewer should pass a clean report."""
-        from ora.agents.reviewer import parse_reviewer_output
         import json
+
+        from ora.agents.reviewer import parse_reviewer_output
         output = json.dumps({
             "verdict": "PASS",
             "blocking": [],
@@ -57,8 +59,8 @@ class TestFullPipeline:
         from ora.agents.supervisor import (
             route_after_plan,
             route_after_researcher,
-            route_after_writer,
             route_after_reviewer,
+            route_after_writer,
         )
 
         # Plan -> Researcher

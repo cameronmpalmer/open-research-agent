@@ -2,11 +2,13 @@
 import json
 import re
 from typing import Any, Literal
+
 from langchain_core.runnables import RunnableConfig
-from ora.state import ResearchState
-from ora.prompts import SUPERVISOR_PLAN_PROMPT, SUPERVISOR_REVISE_PROMPT, _search_query_count
-from ora.config import load_config, get_llm, get_supervisor_model
+
+from ora.config import get_llm, get_supervisor_model, load_config
 from ora.progress import emit_progress
+from ora.prompts import SUPERVISOR_PLAN_PROMPT, SUPERVISOR_REVISE_PROMPT, _search_query_count
+from ora.state import ResearchState
 
 
 def _invoke_supervisor(prompt: str) -> str:

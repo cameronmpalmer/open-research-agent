@@ -1,19 +1,21 @@
 """LangGraph StateGraph assembly for ORA."""
 import warnings
+
 warnings.filterwarnings("ignore", message=".*allowed_objects.*", module="langgraph")
 
-from langgraph.graph import StateGraph, END
-from ora.state import ResearchState
+from langgraph.graph import END, StateGraph
+
+from ora.agents.researcher import researcher_node
+from ora.agents.reviewer import reviewer_node
 from ora.agents.supervisor import (
     plan_node,
     route_after_plan,
     route_after_researcher,
-    route_after_writer,
     route_after_reviewer,
+    route_after_writer,
 )
-from ora.agents.researcher import researcher_node
 from ora.agents.writer import writer_node
-from ora.agents.reviewer import reviewer_node
+from ora.state import ResearchState
 
 
 def build_plan_graph() -> StateGraph:

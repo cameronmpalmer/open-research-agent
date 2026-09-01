@@ -26,7 +26,7 @@ class TestGraphAssembly:
         assert "reviewer" in graph.nodes
 
     def test_graph_accepts_initial_state(self):
-        graph = build_graph()
+        build_graph()
         initial_state: ResearchState = {
             "query": "test",
             "intensity": 2,

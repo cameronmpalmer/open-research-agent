@@ -236,7 +236,6 @@ def test_researcher_skips_hostile_domains(monkeypatch):
     )
 
     messages = [event["message"] for event in events]
-    kinds = [event["kind"] for event in events]
 
     assert len(result["sources"]) == 1
     assert len(result["findings"]) == 1
@@ -257,7 +256,7 @@ def test_scrape_and_collect_deduplicates_intra_query_duplicates(monkeypatch):
     (same URL appearing twice in one Firecrawl response) must still be
     caught by _scrape_and_collect itself.
     """
-    from ora.agents.researcher import _scrape_and_collect, LEVEL_PARAMS
+    from ora.agents.researcher import LEVEL_PARAMS, _scrape_and_collect
 
     monkeypatch.setattr(
         "ora.tools.scrape.scrape_page",

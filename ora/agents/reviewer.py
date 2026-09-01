@@ -1,10 +1,12 @@
 """Adversarial reviewer agent node for LangGraph."""
 import json
 from typing import Any
+
 from langchain_core.runnables import RunnableConfig
-from ora.state import ResearchState, ReviewVerdict
+
+from ora.config import get_llm, get_reviewer_model, load_config
 from ora.prompts import REVIEWER_PROMPT
-from ora.config import load_config, get_reviewer_model, get_llm
+from ora.state import ResearchState, ReviewVerdict
 
 
 def parse_reviewer_output(output: str) -> ReviewVerdict:
@@ -37,7 +39,7 @@ def parse_reviewer_output(output: str) -> ReviewVerdict:
     except (json.JSONDecodeError, ValueError, KeyError) as e:
         return ReviewVerdict(
             verdict="REVISE",
-            blocking=[f"Reviewer output parsing failed: {str(e)}. Raw: {output[:200]}"],
+            blocking=[f"Reviewer output parsing failed: {e!s}. Raw: {output[:200]}"],
         )
 
 

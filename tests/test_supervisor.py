@@ -1,5 +1,4 @@
 """Tests for supervisor agent."""
-import pytest
 from ora.agents.supervisor import _extract_search_queries, _search_queries_fence_found
 from ora.state import ResearchState
 

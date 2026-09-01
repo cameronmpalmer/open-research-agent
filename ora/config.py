@@ -1,6 +1,6 @@
 """Configuration loading via YAML, env vars, and pydantic-settings."""
 import os
-from typing import Optional
+
 import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,15 +13,15 @@ class LimitSettings(BaseModel):
 
 class SearchSettings(BaseModel):
     provider: str = "firecrawl"
-    firecrawl_api_key: Optional[str] = None
+    firecrawl_api_key: str | None = None
     firecrawl_api_url: str = "https://api.firecrawl.com"
 
 
 class ModelSettings(BaseModel):
     default: str = "deepseek-v4-flash"
-    researcher: Optional[str] = None
-    supervisor: Optional[str] = None
-    reviewer: Optional[str] = "deepseek-v4-pro"
+    researcher: str | None = None
+    supervisor: str | None = None
+    reviewer: str | None = "deepseek-v4-pro"
 
 
 class OutputSettings(BaseModel):
@@ -46,7 +46,7 @@ class ORASettings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
 
 
-def load_config(config_path: Optional[str] = None) -> ORASettings:
+def load_config(config_path: str | None = None) -> ORASettings:
     """Load ORA configuration from YAML file and environment.
 
     Priority: env vars > YAML file > defaults.

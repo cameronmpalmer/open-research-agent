@@ -1,6 +1,5 @@
 """Tests for source evaluation."""
-import pytest
-from ora.tools.evaluate import evaluate_source, compute_craap_score, rate_reliability
+from ora.tools.evaluate import compute_craap_score, evaluate_source, rate_reliability
 
 
 class TestEvaluateSource:

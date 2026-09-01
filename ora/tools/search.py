@@ -1,6 +1,7 @@
 """Firecrawl search tool for LangChain."""
 import requests
 from langchain_core.tools import tool
+
 from ora.config import get_firecrawl_client
 
 
@@ -39,8 +40,8 @@ def web_search(query: str) -> str:
             snippet = item.get("description", "")[:300]
             formatted.append(f"{i}. [{title}]({url})\n   {snippet}")
         return "\n\n".join(formatted)
-    except Exception as e:
-        return f"Search error: {str(e)}"
+    except Exception as e:  # noqa: BLE001
+        return f"Search error: {e!s}"
 
 
 def create_search_tool(api_key: str = ""):

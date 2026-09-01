@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
-from ora.cli import main, _format_progress_event
+
+from ora.cli import _format_progress_event, main
 
 
 def _fake_settings():

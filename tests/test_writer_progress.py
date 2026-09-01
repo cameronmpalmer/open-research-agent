@@ -1,5 +1,6 @@
 """Tests for writer progress events."""
 import pytest
+
 from ora.agents import writer as writer_module
 from ora.agents.writer import writer_node
 from ora.state import Finding, SourceExtraction

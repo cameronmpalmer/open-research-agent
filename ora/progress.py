@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal, TypedDict
 
-
 ProgressKind = Literal["info", "search", "scrape", "success", "error", "warning", "write"]
 
 logger = logging.getLogger(__name__)

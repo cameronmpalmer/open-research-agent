@@ -1,6 +1,6 @@
 """Tests for adversarial reviewer agent."""
 import json
-from ora.state import ReviewVerdict
+
 from ora.agents.reviewer import parse_reviewer_output
 
 

@@ -1,11 +1,11 @@
 """Tests for intensity level 4-5 behavior."""
 from ora.agents.researcher import (
-    generate_search_queries,
+    LEVEL_PARAMS,
+    _format_reviewer_feedback,
     generate_gap_queries,
     generate_gap_queries_dynamic,
-    _format_reviewer_feedback,
+    generate_search_queries,
     researcher_node,
-    LEVEL_PARAMS,
 )
 from ora.state import ReviewVerdict
 
@@ -247,8 +247,8 @@ class TestIntensityGatedExtraction:
     def test_intensity_1_uses_heuristic_evaluation(self, monkeypatch):
         """At intensity 1, _scrape_and_collect should call the heuristic
         evaluate_source, not the LLM extract_and_evaluate."""
-        from ora.state import Source
         from ora.agents.researcher import _scrape_and_collect
+        from ora.state import Source
 
         call_log = []
 
@@ -289,8 +289,8 @@ class TestIntensityGatedExtraction:
     def test_intensity_4_uses_llm_extraction(self, monkeypatch):
         """At intensity 4, _scrape_and_collect should call the LLM
         extract_and_evaluate, not the heuristic."""
-        from ora.state import Source, SourceExtraction
         from ora.agents.researcher import _scrape_and_collect
+        from ora.state import Source, SourceExtraction
 
         call_log = []
 
@@ -334,8 +334,8 @@ class TestIntensityGatedExtraction:
     def test_intensity_3_uses_llm_extraction(self, monkeypatch):
         """At intensity 3 (the threshold), _scrape_and_collect should use
         LLM extraction, not heuristic."""
-        from ora.state import Source, SourceExtraction
         from ora.agents.researcher import _scrape_and_collect
+        from ora.state import Source, SourceExtraction
 
         call_log = []
 

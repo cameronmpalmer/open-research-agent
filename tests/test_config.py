@@ -1,8 +1,17 @@
 """Tests for configuration loading."""
 import os
 import tempfile
+
 import pytest
-from ora.config import load_config, ORASettings, get_researcher_model, get_reviewer_model, get_supervisor_model, get_llm
+
+from ora.config import (
+    ORASettings,
+    get_llm,
+    get_researcher_model,
+    get_reviewer_model,
+    get_supervisor_model,
+    load_config,
+)
 
 
 class TestORASettings:
