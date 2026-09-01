@@ -56,7 +56,7 @@ Install the git pre-commit hook once per clone with `make install-hooks`. It run
 
 ## Configuration for local runs
 
-ORA 0.1.0 currently supports the DeepSeek API as its LLM backend and Firecrawl for search and scraping.
+ORA supports the DeepSeek API and OpenRouter as LLM backends, and Firecrawl for search and scraping.
 
 ```bash
 export DEEPSEEK_API_KEY="your-deepseek-api-key"

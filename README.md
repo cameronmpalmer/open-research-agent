@@ -80,8 +80,10 @@ open-research-agent research "..." --model openrouter:anthropic/claude-3.5-sonne
 ```
 
 Without a prefix, calls use the default provider (`deepseek` by default). The
-default can be changed in `config.yaml` under `provider.default`. Each provider
-reads its API key from the environment variable named in its `api_key_env`
+default can be changed in `config.yaml` under `provider.default`. An unknown
+prefix (e.g. `openai:gpt-4.1`) warns and falls back to the default provider.
+Each provider reads its API key from the environment variable named in its
+`api_key_env`
 (`DEEPSEEK_API_KEY` for deepseek, `OPENROUTER_API_KEY` for openrouter), and can
 be configured under `providers:` in `config.yaml`:
 

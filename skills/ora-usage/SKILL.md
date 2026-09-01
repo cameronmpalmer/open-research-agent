@@ -7,7 +7,7 @@ description: Use when running ORA (Open Research Agent) CLI commands, configurin
 
 ## Overview
 
-ORA is a multi-agent research CLI (v0.1.0) that turns a query into a sourced markdown report. Pipeline: Supervisor plans → Researcher searches and scrapes → Writer synthesizes → Reviewer audits (intensity 3+). Backends: DeepSeek API (LLM), Firecrawl (search/scrape).
+ORA is a multi-agent research CLI (v0.1.0) that turns a query into a sourced markdown report. Pipeline: Supervisor plans → Researcher searches and scrapes → Writer synthesizes → Reviewer audits (intensity 3+). Backends: DeepSeek API and OpenRouter (LLM), Firecrawl (search/scrape).
 
 ## Required Setup
 
