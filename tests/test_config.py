@@ -124,6 +124,18 @@ class TestGetLlmRouting:
         get_llm("deepseek-v4-flash")
         assert captures["api_key"] == "sk-openai-legacy"
 
+    def test_custom_provider_without_base_url_raises(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MY_API_KEY", "sk-custom")
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("providers:\n  custom:\n    api_key_env: MY_API_KEY\n")
+        from ora.config import load_config as load_config_fn
+
+        monkeypatch.setattr(
+            "ora.config.load_config", lambda *a, **kw: load_config_fn(str(config_file))
+        )
+        with pytest.raises(ValueError, match="base_url"):
+            get_llm("custom:my-model")
+
 
 class TestSplitProvider:
     def test_no_prefix(self):

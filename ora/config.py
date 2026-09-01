@@ -211,6 +211,11 @@ def get_llm(model_name: str, temperature: float = 0.0):
         raise ValueError(
             f"Unknown default provider '{provider_name}'. Check the 'provider.default' setting."
         )
+    if not provider.base_url:
+        raise ValueError(
+            f"Provider '{provider_name}' has no base_url configured. "
+            f"Set providers.{provider_name}.base_url in config.yaml."
+        )
 
     api_key = os.environ.get(provider.api_key_env or "", "")
     if not api_key and provider_name == "deepseek":
