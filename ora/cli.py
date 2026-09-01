@@ -9,7 +9,7 @@ from datetime import datetime
 import click
 import yaml
 
-from ora.config import get_researcher_model, load_config
+from ora.config import DEFAULT_PROVIDERS, _resolve_provider, get_researcher_model, load_config
 
 logging.captureWarnings(True)
 warnings.filterwarnings("ignore", message=".*allowed_objects.*", module="langgraph")
@@ -359,6 +359,21 @@ def config(show, init):
                 "firecrawl_api_url": "https://api.firecrawl.com",
             },
             "limits": {"max_revisions": 3, "default_intensity": 2},
+            "provider": {"default": "deepseek"},
+            "providers": {
+                "deepseek": {
+                    "base_url": "https://api.deepseek.com",
+                    "api_key_env": "DEEPSEEK_API_KEY",
+                },
+                "openrouter": {
+                    "base_url": "https://openrouter.ai/api/v1",
+                    "api_key_env": "OPENROUTER_API_KEY",
+                    "headers": {
+                        "HTTP-Referer": "https://github.com/cameronmpalmer/open-research-agent",
+                        "X-Title": "ORA",
+                    },
+                },
+            },
         }
         with open(config_path, "w") as f:
             yaml.dump(default_config, f, default_flow_style=False)
@@ -379,6 +394,17 @@ def config(show, init):
     click.echo()
     click.echo(f"Search backend: {settings.search.provider}")
     click.echo(f"Firecrawl URL: {settings.search.firecrawl_api_url}")
+    click.echo(f"Default provider: {settings.provider.default or 'deepseek'}")
+    for name in sorted(set(DEFAULT_PROVIDERS) | set(settings.providers)):
+        resolved = _resolve_provider(settings, name)
+        if resolved is None:
+            continue
+        key_env = resolved.api_key_env or ""
+        key_set = "yes" if os.environ.get(key_env) else "no"
+        click.echo(
+            f"  {name}: {resolved.base_url} (key env: {key_env or 'n/a'}, key set: {key_set})"
+        )
+    click.echo()
     click.echo(f"Max revisions: {settings.limits.max_revisions}")
     click.echo()
 

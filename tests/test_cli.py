@@ -22,6 +22,9 @@ def _fake_settings():
         search=SimpleNamespace(provider="firecrawl", firecrawl_api_url="https://api.firecrawl.com"),
         output=SimpleNamespace(default_format="markdown", always_include_sources=True),
         limits=SimpleNamespace(max_revisions=3),
+        provider=SimpleNamespace(default="deepseek"),
+        providers={},
+        deepseek_base_url="https://api.deepseek.com",
     )
 
 
@@ -151,6 +154,18 @@ class TestCLI:
         assert result.exit_code == 0
         assert "Config created" in result.output
         assert (tmp_path / ".ora" / "config.yaml").exists()
+        content = (tmp_path / ".ora" / "config.yaml").read_text()
+        assert "openrouter" in content
+        assert "api_key_env" in content
+
+    def test_config_show_lists_providers(self, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(main, ["config", "--show"], env={"HOME": str(tmp_path)})
+        assert result.exit_code == 0
+        assert "Default provider: deepseek" in result.output
+        assert "deepseek" in result.output
+        assert "openrouter" in result.output
+        assert "key set:" in result.output
 
     def test_research_without_query_fails(self):
         runner = CliRunner()
