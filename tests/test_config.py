@@ -23,6 +23,8 @@ class TestORASettings:
         assert settings.limits.max_revisions == 3
         assert settings.limits.default_intensity == 2
         assert settings.deepseek_base_url == "https://api.deepseek.com"
+        assert settings.provider.default == "deepseek"
+        assert settings.providers == {}
         assert settings.models.reviewer == "deepseek-v4-pro"
 
     def test_env_override(self, monkeypatch):
@@ -81,3 +83,56 @@ class TestGetLlmWarning:
             warnings.simplefilter("always")
             get_llm("deepseek-v4-flash")
         assert len(record) == 0, f"Unexpected warnings: {[str(w.message) for w in record]}"
+
+
+class TestProviders:
+    def test_builtin_defaults(self):
+        from ora.config import DEFAULT_PROVIDERS
+
+        assert DEFAULT_PROVIDERS["deepseek"].base_url == "https://api.deepseek.com"
+        assert DEFAULT_PROVIDERS["deepseek"].api_key_env == "DEEPSEEK_API_KEY"
+        assert DEFAULT_PROVIDERS["openrouter"].base_url == "https://openrouter.ai/api/v1"
+        assert DEFAULT_PROVIDERS["openrouter"].api_key_env == "OPENROUTER_API_KEY"
+        assert DEFAULT_PROVIDERS["openrouter"].headers["X-Title"] == "ORA"
+
+    def test_loads_providers_from_yaml(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(
+                "provider:\n"
+                "  default: openrouter\n"
+                "providers:\n"
+                "  openrouter:\n"
+                "    base_url: https://openrouter.ai/api/v1\n"
+                "    api_key_env: OR_API_KEY\n"
+            )
+            f.flush()
+            config = load_config(f.name)
+            assert config.provider.default == "openrouter"
+            assert config.providers["openrouter"].api_key_env == "OR_API_KEY"
+            os.unlink(f.name)
+
+    def test_legacy_deepseek_base_url_migrates_without_providers_section(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("deepseek_base_url: https://legacy.example.com\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.providers["deepseek"].base_url == "https://legacy.example.com"
+            os.unlink(f.name)
+
+    def test_providers_section_wins_over_legacy(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(
+                "deepseek_base_url: https://legacy.example.com\n"
+                "providers:\n"
+                "  deepseek:\n"
+                "    base_url: https://new.example.com\n"
+            )
+            f.flush()
+            config = load_config(f.name)
+            assert config.providers["deepseek"].base_url == "https://new.example.com"
+            os.unlink(f.name)
+
+    def test_env_default_provider_override(self, monkeypatch):
+        monkeypatch.setenv("ORA_PROVIDER__DEFAULT", "openrouter")
+        settings = ORASettings()
+        assert settings.provider.default == "openrouter"

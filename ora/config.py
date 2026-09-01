@@ -25,6 +25,16 @@ class ModelSettings(BaseModel):
     reviewer: str | None = "deepseek-v4-pro"
 
 
+class ProviderDefaultSettings(BaseModel):
+    default: str = "deepseek"
+
+
+class ProviderSettings(BaseModel):
+    base_url: str | None = None
+    api_key_env: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
 class OutputSettings(BaseModel):
     default_format: str = "markdown"
     always_include_sources: bool = True
@@ -44,7 +54,25 @@ class ORASettings(BaseSettings):
     search: SearchSettings = Field(default_factory=SearchSettings)
     output: OutputSettings = Field(default_factory=OutputSettings)
     limits: LimitSettings = Field(default_factory=LimitSettings)
-    deepseek_base_url: str = "https://api.deepseek.com"
+    provider: ProviderDefaultSettings = Field(default_factory=ProviderDefaultSettings)
+    providers: dict[str, ProviderSettings] = Field(default_factory=dict)
+    deepseek_base_url: str = "https://api.deepseek.com"  # legacy; kept for backward compat
+
+
+DEFAULT_PROVIDERS: dict[str, ProviderSettings] = {
+    "deepseek": ProviderSettings(
+        base_url="https://api.deepseek.com",
+        api_key_env="DEEPSEEK_API_KEY",
+    ),
+    "openrouter": ProviderSettings(
+        base_url="https://openrouter.ai/api/v1",
+        api_key_env="OPENROUTER_API_KEY",
+        headers={
+            "HTTP-Referer": "https://github.com/cameronmpalmer/open-research-agent",
+            "X-Title": "ORA",
+        },
+    ),
+}
 
 
 def load_config(config_path: str | None = None) -> ORASettings:
@@ -68,6 +96,18 @@ def load_config(config_path: str | None = None) -> ORASettings:
                 settings.output = OutputSettings(**yaml_data["output"])
             if "limits" in yaml_data:
                 settings.limits = LimitSettings(**yaml_data["limits"])
+            if "provider" in yaml_data:
+                settings.provider = ProviderDefaultSettings(**yaml_data["provider"])
+            if "providers" in yaml_data:
+                settings.providers = {
+                    name: ProviderSettings(**cfg)
+                    for name, cfg in yaml_data["providers"].items()
+                }
+            elif "deepseek_base_url" in yaml_data:
+                # Legacy config: no providers map, honor the old flat key.
+                settings.providers["deepseek"] = ProviderSettings(
+                    base_url=yaml_data["deepseek_base_url"]
+                )
             if "deepseek_base_url" in yaml_data:
                 settings.deepseek_base_url = yaml_data["deepseek_base_url"]
 
