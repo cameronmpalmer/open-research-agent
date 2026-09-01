@@ -49,7 +49,7 @@ plan: $(VENV)/.stamp ## Preview a research plan: make plan QUERY="..."
 research: $(VENV)/.stamp ## Run research: make research QUERY="..." INTENSITY=3 OUTPUT=reports/x.md
 	@test -n "$(QUERY)" || (echo "QUERY is required. Usage: make research QUERY=\"your research question\""; exit 1)
 	@mkdir -p reports
-	$(ORA) research "$(QUERY)" --intensity $(INTENSITY) -y --output $(OUTPUT)
+	$(ORA) research "$(QUERY)" --intensity $(INTENSITY) -y --output "$(OUTPUT)"
 
 clean: ## Remove build artifacts and caches (keeps .venv)
 	rm -rf dist build *.egg-info .pytest_cache .ruff_cache .coverage htmlcov
