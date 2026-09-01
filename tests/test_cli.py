@@ -183,7 +183,7 @@ class TestCLI:
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
-        result = runner.invoke(main, ["research", "Rust vs Go"])
+        result = runner.invoke(main, ["research", "Rust vs Go", "--no-save"])
 
         assert result.exit_code == 0
         assert (
@@ -216,7 +216,7 @@ class TestCLI:
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
-        result = runner.invoke(main, ["research", "Rust vs Go", "--quiet"])
+        result = runner.invoke(main, ["research", "Rust vs Go", "--quiet", "--no-save"])
 
         assert result.exit_code == 0
         assert received_configs == [None]
@@ -241,7 +241,7 @@ class TestCLI:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["research", "Rust vs Go", "--no-review", "--max-revisions", "7"]
+            main, ["research", "Rust vs Go", "--no-review", "--max-revisions", "7", "--no-save"]
         )
 
         assert result.exit_code == 0
@@ -284,7 +284,7 @@ class TestCLI:
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
-        result = runner.invoke(main, ["research", "Rust vs Go"])
+        result = runner.invoke(main, ["research", "Rust vs Go", "--no-save"])
 
         assert result.exit_code == 0
         assert received_plans and "edited content" in received_plans[0]
@@ -330,7 +330,7 @@ class TestCLI:
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
-        result = runner.invoke(main, ["research", "Rust vs Go"])
+        result = runner.invoke(main, ["research", "Rust vs Go", "--no-save"])
 
         assert result.exit_code == 0
         assert len(revise_calls) == 1
@@ -358,7 +358,7 @@ class TestCLI:
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
-        result = runner.invoke(main, ["research", "Rust vs Go"])
+        result = runner.invoke(main, ["research", "Rust vs Go", "--no-save"])
 
         assert result.exit_code == 0
         assert research_ran == []
@@ -386,7 +386,7 @@ class TestCLI:
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
-        result = runner.invoke(main, ["research", "Rust vs Go", "-y"])
+        result = runner.invoke(main, ["research", "Rust vs Go", "-y", "--no-save"])
 
         assert result.exit_code == 0
         assert prompt_called == []  # prompt was never invoked
@@ -423,7 +423,7 @@ class TestCLI:
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
-        result = runner.invoke(main, ["research", "test query"])
+        result = runner.invoke(main, ["research", "test query", "--no-save"])
 
         assert result.exit_code == 0
         assert len(research_invoked) == 1
@@ -472,7 +472,7 @@ class TestCLI:
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
-        result = runner.invoke(main, ["research", "test query"])
+        result = runner.invoke(main, ["research", "test query", "--no-save"])
 
         assert result.exit_code == 0
         assert len(research_invoked) == 1
@@ -499,7 +499,11 @@ class TestCLI:
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
-        result = runner.invoke(main, ["research", "Rust vs Go", "-y", "--hide-plan-on-autoapprove"])
+        result = runner.invoke(
+            main, ["research", "Rust vs Go", "-y", "--hide-plan-on-autoapprove", "--no-save"]
+        )
 
         assert result.exit_code == 0
-        assert plan_rendered == []  # plan never printed
+        # The plan must never be rendered under --hide-plan-on-autoapprove.
+        # (The final report may be rendered to stdout when --no-save is used.)
+        assert all("# Plan" not in text for text in plan_rendered)
