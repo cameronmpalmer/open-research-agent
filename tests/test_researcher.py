@@ -1,4 +1,5 @@
 """Tests for researcher agent."""
+
 from ora.agents.researcher import _normalize_url_for_dedupe, generate_search_queries
 from ora.state import Finding, ResearchState, Source, SourceExtraction
 
@@ -23,9 +24,9 @@ class TestGenerateSearchQueries:
 
 class TestNormalizeUrlForDedupe:
     def test_normalizes_http_and_https_to_same_key(self):
-        assert _normalize_url_for_dedupe(
-            "http://example.com/article"
-        ) == _normalize_url_for_dedupe("https://example.com/article")
+        assert _normalize_url_for_dedupe("http://example.com/article") == _normalize_url_for_dedupe(
+            "https://example.com/article"
+        )
 
     def test_ignores_fragments_and_trailing_slashes(self):
         assert _normalize_url_for_dedupe(
@@ -53,6 +54,7 @@ class TestResearcherUsesSearchQueries:
             return "[Plan Queries Test](https://example.com/sp1)\n  test snippet\n[Plan Queries 2](https://example.com/sp2)\n  snippet 2"
 
         import types
+
         mock_web_search = types.SimpleNamespace(invoke=fake_web_search_invoke)
         # Patch at source module: function-level import in researcher_node
         # does `from ora.tools.search import web_search`
@@ -142,7 +144,9 @@ class TestResearcherReviseLoop:
         from ora.agents.researcher import researcher_node
         from ora.state import ReviewVerdict
 
-        existing_sources = [Source(url=f"https://example.com/{i}", title=f"Source {i}") for i in range(15)]
+        existing_sources = [
+            Source(url=f"https://example.com/{i}", title=f"Source {i}") for i in range(15)
+        ]
         verdict = ReviewVerdict(
             verdict="REVISE",
             blocking=["Need source on topic X"],
@@ -181,7 +185,9 @@ class TestResearcherReviseLoop:
             )
 
         monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", fake_extract_and_evaluate)
-        monkeypatch.setattr("ora.tools.evaluate.evaluate_source", lambda u, t, c, cc: Source(url=u, title=t))
+        monkeypatch.setattr(
+            "ora.tools.evaluate.evaluate_source", lambda u, t, c, cc: Source(url=u, title=t)
+        )
 
         template_calls = []
 
@@ -205,7 +211,9 @@ class TestResearcherReviseLoop:
         """Without a REVISE verdict, normal behavior: no bypass of min_sources."""
         from ora.agents.researcher import researcher_node
 
-        existing_sources = [Source(url=f"https://example.com/{i}", title=f"Source {i}") for i in range(15)]
+        existing_sources = [
+            Source(url=f"https://example.com/{i}", title=f"Source {i}") for i in range(15)
+        ]
 
         state = ResearchState(
             query="test query",

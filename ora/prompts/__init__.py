@@ -1,6 +1,5 @@
 """Prompt templates for ORA agents."""
 
-
 from ora.prompts.extractor import EXTRACTOR_PROMPT
 from ora.prompts.researcher import GAP_QUERY_PROMPT, RESEARCHER_PROMPT
 from ora.prompts.reviewer import REVIEWER_PROMPT

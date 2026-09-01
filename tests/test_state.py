@@ -1,4 +1,5 @@
 """Tests for state types."""
+
 from typing import get_type_hints
 
 from ora.state import Finding, ResearchState, ReviewVerdict, Source

@@ -1,4 +1,5 @@
 """Per-source LLM extraction and evaluation."""
+
 import json
 
 from langchain_core.runnables import RunnableConfig
@@ -58,7 +59,7 @@ def extract_and_evaluate(
     try:
         llm = get_llm(model_name, temperature=0.1)
         response = llm.invoke(prompt_text)
-        text = response.content if hasattr(response, 'content') else str(response)
+        text = response.content if hasattr(response, "content") else str(response)
     except Exception:  # noqa: BLE001
         emit_progress(
             config,

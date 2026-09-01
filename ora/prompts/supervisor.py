@@ -2,9 +2,11 @@
 
 _SEARCH_QUERY_COUNTS = {1: 1, 2: 3, 3: 7, 4: 12, 5: 16}
 
+
 def _search_query_count(intensity: int) -> int:
     """Return the number of search queries to generate for a given intensity."""
     return _SEARCH_QUERY_COUNTS.get(intensity, 3)
+
 
 SUPERVISOR_PLAN_PROMPT = """You are a research planner. Your job is to create a research plan for the following query.
 

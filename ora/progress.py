@@ -3,6 +3,7 @@
 Agents call these helpers through LangGraph RunnableConfig. The CLI decides
 whether and how to render events.
 """
+
 from __future__ import annotations
 
 import logging

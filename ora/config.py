@@ -1,4 +1,5 @@
 """Configuration loading via YAML, env vars, and pydantic-settings."""
+
 import os
 
 import yaml
@@ -98,12 +99,8 @@ def get_firecrawl_client():
     from firecrawl import FirecrawlApp
 
     settings = load_config()
-    api_key = os.environ.get(
-        "FIRECRAWL_API_KEY", settings.search.firecrawl_api_key or ""
-    )
-    api_url = os.environ.get(
-        "FIRECRAWL_API_URL", settings.search.firecrawl_api_url
-    )
+    api_key = os.environ.get("FIRECRAWL_API_KEY", settings.search.firecrawl_api_key or "")
+    api_url = os.environ.get("FIRECRAWL_API_URL", settings.search.firecrawl_api_url)
     return FirecrawlApp(api_key=api_key, api_url=api_url)
 
 
@@ -118,13 +115,12 @@ def get_llm(model_name: str, temperature: float = 0.0):
     settings = load_config()
     api_key = os.environ.get("DEEPSEEK_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
     if not api_key:
-        raise ValueError(
-            "No API key configured. Set DEEPSEEK_API_KEY or OPENAI_API_KEY."
-        )
+        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY or OPENAI_API_KEY.")
 
     clean_name = model_name.split(":", 1)[-1] if ":" in model_name else model_name
     if clean_name != model_name:
         import warnings
+
         warnings.warn(
             f"Model name '{model_name}' contains a provider prefix which is"
             f" ignored (ORA connects to the configured base URL, currently"

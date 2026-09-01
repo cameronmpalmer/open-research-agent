@@ -1,4 +1,5 @@
 """LangGraph StateGraph assembly for ORA."""
+
 import warnings
 
 warnings.filterwarnings("ignore", message=".*allowed_objects.*", module="langgraph")
@@ -44,21 +45,25 @@ def build_research_graph(intensity: int = 2, no_review: bool = False) -> StateGr
     if intensity >= 3 and not no_review:
         workflow.add_node("reviewer", reviewer_node)
         workflow.add_conditional_edges(
-            "writer", route_after_writer,
+            "writer",
+            route_after_writer,
             {"reviewer": "reviewer", "__end__": END},
         )
         workflow.add_conditional_edges(
-            "reviewer", route_after_reviewer,
+            "reviewer",
+            route_after_reviewer,
             {"researcher": "researcher", "__end__": END},
         )
     else:
         workflow.add_conditional_edges(
-            "writer", route_after_writer,
+            "writer",
+            route_after_writer,
             {"reviewer": END, "__end__": END},
         )
 
     workflow.add_conditional_edges(
-        "researcher", route_after_researcher,
+        "researcher",
+        route_after_researcher,
         {"writer": "writer", "__end__": END},
     )
 
@@ -77,19 +82,23 @@ def build_graph() -> StateGraph:
     workflow.set_entry_point("plan")
 
     workflow.add_conditional_edges(
-        "plan", route_after_plan,
+        "plan",
+        route_after_plan,
         {"researcher": "researcher", "__end__": END},
     )
     workflow.add_conditional_edges(
-        "researcher", route_after_researcher,
+        "researcher",
+        route_after_researcher,
         {"writer": "writer", "__end__": END},
     )
     workflow.add_conditional_edges(
-        "writer", route_after_writer,
+        "writer",
+        route_after_writer,
         {"reviewer": "reviewer", "__end__": END},
     )
     workflow.add_conditional_edges(
-        "reviewer", route_after_reviewer,
+        "reviewer",
+        route_after_reviewer,
         {"researcher": "researcher", "__end__": END},
     )
 

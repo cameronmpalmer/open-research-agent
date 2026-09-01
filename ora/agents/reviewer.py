@@ -1,4 +1,5 @@
 """Adversarial reviewer agent node for LangGraph."""
+
 import json
 from typing import Any
 
@@ -43,9 +44,7 @@ def parse_reviewer_output(output: str) -> ReviewVerdict:
         )
 
 
-def reviewer_node(
-    state: ResearchState, config: RunnableConfig = None
-) -> dict[str, Any]:
+def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[str, Any]:
     """Adversarial reviewer LangGraph node.
 
     Receives the draft report and original query. Does NOT receive the
@@ -67,11 +66,11 @@ def reviewer_node(
     )
 
     response = llm.invoke(prompt_text)
-    output = response.content if hasattr(response, 'content') else str(response)
+    output = response.content if hasattr(response, "content") else str(response)
 
     verdict = parse_reviewer_output(output)
 
-    v = verdict.verdict if hasattr(verdict, 'verdict') else "PASS"
+    v = verdict.verdict if hasattr(verdict, "verdict") else "PASS"
     if v == "REVISE":
         emit_progress(
             config,

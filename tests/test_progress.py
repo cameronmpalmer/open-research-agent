@@ -1,4 +1,5 @@
 """Tests for progress event helper."""
+
 from ora.progress import emit_progress
 
 

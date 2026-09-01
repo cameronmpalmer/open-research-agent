@@ -1,4 +1,5 @@
 """Tests for CLI interface."""
+
 import subprocess
 import sys
 from pathlib import Path
@@ -26,10 +27,16 @@ def _fake_settings():
 
 class TestCLI:
     def test_format_progress_event_search(self):
-        assert _format_progress_event({"kind": "search", "message": "Researcher: searching"}) == "🔎 Researcher: searching"
+        assert (
+            _format_progress_event({"kind": "search", "message": "Researcher: searching"})
+            == "🔎 Researcher: searching"
+        )
 
     def test_format_progress_event_unknown_kind_uses_bullet(self):
-        assert _format_progress_event({"kind": "unexpected", "message": "Something happened"}) == "• Something happened"
+        assert (
+            _format_progress_event({"kind": "unexpected", "message": "Something happened"})
+            == "• Something happened"
+        )
 
     @pytest.mark.parametrize(
         "event, expected",
@@ -170,8 +177,12 @@ class TestCLI:
         result = runner.invoke(main, ["research", "Rust vs Go"])
 
         assert result.exit_code == 0
-        assert received_configs and received_configs[0]["configurable"]["progress_callback"] == cli_module._print_progress_event
-        assert "🔎 Researcher: searching \"Rust vs Go\"" in result.output
+        assert (
+            received_configs
+            and received_configs[0]["configurable"]["progress_callback"]
+            == cli_module._print_progress_event
+        )
+        assert '🔎 Researcher: searching "Rust vs Go"' in result.output
         assert "✓ Writer: draft generated, 42 chars" in result.output
 
     def test_research_quiet_does_not_pass_progress_callback(self, monkeypatch):
@@ -220,7 +231,9 @@ class TestCLI:
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
         runner = CliRunner()
-        result = runner.invoke(main, ["research", "Rust vs Go", "--no-review", "--max-revisions", "7"])
+        result = runner.invoke(
+            main, ["research", "Rust vs Go", "--no-review", "--max-revisions", "7"]
+        )
 
         assert result.exit_code == 0
         assert "--no-review is only relevant for intensity 3+" in result.output
@@ -238,7 +251,11 @@ class TestCLI:
 
         class FakePlanGraph:
             def invoke(self, state, config=None):
-                return {"research_plan": "# Original\n\n## Section\n\ncontent", "plan_approved": False, "messages": ["# Plan"]}
+                return {
+                    "research_plan": "# Original\n\n## Section\n\ncontent",
+                    "plan_approved": False,
+                    "messages": ["# Plan"],
+                }
 
         class FakeResearchGraph:
             def invoke(self, state, config=None):
@@ -249,7 +266,11 @@ class TestCLI:
         monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
         monkeypatch.setattr(cli_module.click, "prompt", _fake_prompt)
-        monkeypatch.setattr(cli_module.click, "edit", lambda text=None, extension=None: "# Edited\n\n## New Section\n\nedited content\n")
+        monkeypatch.setattr(
+            cli_module.click,
+            "edit",
+            lambda text=None, extension=None: "# Edited\n\n## New Section\n\nedited content\n",
+        )
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
@@ -281,7 +302,11 @@ class TestCLI:
 
         class FakePlanGraph:
             def invoke(self, state, config=None):
-                return {"research_plan": "# Original", "plan_approved": False, "messages": ["# Plan"]}
+                return {
+                    "research_plan": "# Original",
+                    "plan_approved": False,
+                    "messages": ["# Plan"],
+                }
 
         class FakeResearchGraph:
             def invoke(self, state, config=None):
@@ -345,7 +370,9 @@ class TestCLI:
         monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
         monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
-        monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: prompt_called.append(1) or "A")
+        monkeypatch.setattr(
+            cli_module.click, "prompt", lambda *a, **kw: prompt_called.append(1) or "A"
+        )
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 
@@ -427,7 +454,11 @@ class TestCLI:
         monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
         monkeypatch.setattr(cli_module.click, "prompt", _fake_prompt)
-        monkeypatch.setattr(supervisor_module, "revise_plan_text", lambda q, i, p, f: (revised_plan, ["revised query a", "revised query b"]))
+        monkeypatch.setattr(
+            supervisor_module,
+            "revise_plan_text",
+            lambda q, i, p, f: (revised_plan, ["revised query a", "revised query b"]),
+        )
         monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
         monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
 

@@ -1,4 +1,5 @@
 """Tests for configuration loading."""
+
 import os
 import tempfile
 
@@ -45,6 +46,7 @@ class TestLoadConfig:
 
     def test_get_researcher_model_uses_researcher_override(self):
         from ora.config import ModelSettings
+
         settings = ORASettings(models=ModelSettings(researcher="deepseek-v4-pro"))
         assert get_researcher_model(settings) == "deepseek-v4-pro"
 
@@ -54,6 +56,7 @@ class TestLoadConfig:
 
     def test_get_reviewer_model_fallback_when_reviewer_is_none(self):
         from ora.config import ModelSettings
+
         settings = ORASettings(models=ModelSettings(reviewer=None))
         assert get_reviewer_model(settings) == "deepseek-v4-pro"
 
@@ -73,6 +76,7 @@ class TestGetLlmWarning:
         """get_llm should not warn for bare model names."""
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         import warnings
+
         with warnings.catch_warnings(record=True) as record:
             warnings.simplefilter("always")
             get_llm("deepseek-v4-flash")

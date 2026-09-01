@@ -1,4 +1,5 @@
 """Supervisor agent node for LangGraph."""
+
 import json
 import re
 from typing import Any, Literal
@@ -17,10 +18,10 @@ def _invoke_supervisor(prompt: str) -> str:
     model_name = get_supervisor_model(settings)
     llm = get_llm(model_name, temperature=0)
     response = llm.invoke(prompt)
-    return response.content if hasattr(response, 'content') else str(response)
+    return response.content if hasattr(response, "content") else str(response)
 
 
-_FENCE_RE = re.compile(r'```\s*search_queries\s*\n(.*?)```', re.DOTALL)
+_FENCE_RE = re.compile(r"```\s*search_queries\s*\n(.*?)```", re.DOTALL)
 
 
 def _search_queries_fence_found(plan_text: str) -> bool:
@@ -46,6 +47,7 @@ def _extract_search_queries(plan_text: str) -> list[str]:
     except (json.JSONDecodeError, ValueError):
         try:
             import ast
+
             result = ast.literal_eval(json_str)
         except (ValueError, SyntaxError):
             return []
@@ -55,9 +57,7 @@ def _extract_search_queries(plan_text: str) -> list[str]:
     return []
 
 
-def plan_node(
-    state: ResearchState, config: RunnableConfig = None
-) -> dict[str, Any]:
+def plan_node(state: ResearchState, config: RunnableConfig = None) -> dict[str, Any]:
     """Generate a research plan for user review."""
     intensity = state.get("intensity", 2)
     prompt = SUPERVISOR_PLAN_PROMPT.format(
@@ -137,7 +137,7 @@ def route_after_reviewer(state: ResearchState) -> Literal["researcher", "__end__
     if verdict is None:
         return "__end__"
 
-    v = verdict.verdict if hasattr(verdict, 'verdict') else "REVISE"
+    v = verdict.verdict if hasattr(verdict, "verdict") else "REVISE"
     revision_count = state.get("revision_count", 0)
 
     if v == "PASS":

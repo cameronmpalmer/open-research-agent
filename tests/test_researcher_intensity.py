@@ -1,4 +1,5 @@
 """Tests for intensity level 4-5 behavior."""
+
 from ora.agents.researcher import (
     LEVEL_PARAMS,
     _format_reviewer_feedback,
@@ -155,6 +156,7 @@ class TestQueryDeduplication:
         """When executed_queries is in state, round-1 queries in those
         should be skipped and counted as duplicates."""
         from ora.state import Source
+
         events = []
 
         class FakeTool:
@@ -205,6 +207,7 @@ class TestQueryDeduplication:
         """The node output must include executed_queries so they
         accumulate across invocations via the _list_reducer."""
         from ora.state import Source
+
         events = []
 
         class FakeTool:
@@ -255,6 +258,7 @@ class TestIntensityGatedExtraction:
         class FakeTool:
             def __init__(self, value):
                 self.value = value
+
             def invoke(self, _args):
                 return self.value
 
@@ -297,6 +301,7 @@ class TestIntensityGatedExtraction:
         class FakeTool:
             def __init__(self, value):
                 self.value = value
+
             def invoke(self, _args):
                 return self.value
 

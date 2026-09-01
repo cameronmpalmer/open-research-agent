@@ -1,4 +1,5 @@
 """Integration smoke test for the full ORA pipeline."""
+
 from ora.graph import build_graph
 from ora.state import ResearchState, ReviewVerdict
 
@@ -24,14 +25,17 @@ class TestFullPipeline:
         import json
 
         from ora.agents.reviewer import parse_reviewer_output
-        output = json.dumps({
-            "verdict": "REVISE",
-            "blocking": ["URL https://example.com/fake returns 404"],
-            "required": [],
-            "suggested": [],
-            "contradicting_evidence_found": [],
-            "confidence_recalibrations": {},
-        })
+
+        output = json.dumps(
+            {
+                "verdict": "REVISE",
+                "blocking": ["URL https://example.com/fake returns 404"],
+                "required": [],
+                "suggested": [],
+                "contradicting_evidence_found": [],
+                "confidence_recalibrations": {},
+            }
+        )
         verdict = parse_reviewer_output(output)
         assert verdict.verdict == "REVISE"
         assert len(verdict.blocking) == 1
@@ -42,14 +46,17 @@ class TestFullPipeline:
         import json
 
         from ora.agents.reviewer import parse_reviewer_output
-        output = json.dumps({
-            "verdict": "PASS",
-            "blocking": [],
-            "required": ["minor: add one more source"],
-            "suggested": ["add examples"],
-            "contradicting_evidence_found": [],
-            "confidence_recalibrations": {},
-        })
+
+        output = json.dumps(
+            {
+                "verdict": "PASS",
+                "blocking": [],
+                "required": ["minor: add one more source"],
+                "suggested": ["add examples"],
+                "contradicting_evidence_found": [],
+                "confidence_recalibrations": {},
+            }
+        )
         verdict = parse_reviewer_output(output)
         assert verdict.verdict == "PASS"
         assert len(verdict.blocking) == 0
@@ -76,7 +83,17 @@ class TestFullPipeline:
         assert route_after_writer({"draft_report": ""}) == "__end__"
 
         # Reviewer -> End or Loop
-        assert route_after_reviewer({"review_verdict": ReviewVerdict(verdict="PASS"), "revision_count": 0}) == "__end__"
+        assert (
+            route_after_reviewer(
+                {"review_verdict": ReviewVerdict(verdict="PASS"), "revision_count": 0}
+            )
+            == "__end__"
+        )
         rev_verdict = ReviewVerdict(verdict="REVISE")
-        assert route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 0}) == "researcher"
-        assert route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 3}) == "__end__"
+        assert (
+            route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 0})
+            == "researcher"
+        )
+        assert (
+            route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 3}) == "__end__"
+        )

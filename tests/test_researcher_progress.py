@@ -1,4 +1,5 @@
 """Tests for researcher progress events."""
+
 from ora.agents.researcher import researcher_node
 from ora.state import Source
 
@@ -282,8 +283,16 @@ def test_scrape_and_collect_deduplicates_intra_query_duplicates(monkeypatch):
     ]
 
     _scrape_and_collect(
-        urls, params, 8000, None, log,
-        sources, findings, seen_urls, {}, min_sources=15,
+        urls,
+        params,
+        8000,
+        None,
+        log,
+        sources,
+        findings,
+        seen_urls,
+        {},
+        min_sources=15,
     )
 
     assert len(sources) == 1, "Duplicate URL should be caught by internal dedup"

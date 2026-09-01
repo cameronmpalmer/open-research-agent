@@ -1,4 +1,5 @@
 """Researcher agent node for LangGraph."""
+
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -12,32 +13,64 @@ from ora.state import Finding, ResearchState, Source
 
 # Domains known to block or heavily rate-limit automated scraping.
 # The researcher will skip these and try other results instead.
-SKIP_DOMAINS = frozenset({
-    "reddit.com",
-    "www.reddit.com",
-    "medium.com",
-    "x.com",
-    "twitter.com",
-    "linkedin.com",
-    "www.linkedin.com",
-    "instagram.com",
-    "facebook.com",
-    "www.facebook.com",
-    "tiktok.com",
-    "youtube.com",
-    "www.youtube.com",
-    "quora.com",
-    "www.quora.com",
-})
+SKIP_DOMAINS = frozenset(
+    {
+        "reddit.com",
+        "www.reddit.com",
+        "medium.com",
+        "x.com",
+        "twitter.com",
+        "linkedin.com",
+        "www.linkedin.com",
+        "instagram.com",
+        "facebook.com",
+        "www.facebook.com",
+        "tiktok.com",
+        "youtube.com",
+        "www.youtube.com",
+        "quora.com",
+        "www.quora.com",
+    }
+)
 
 
 LEVEL_PARAMS = {
     # max_rounds is a safety cap; the loop stops earlier when min_sources is reached.
-    1: {"min_sources": 3,  "max_rounds": 5,  "urls_per_query": 5, "scrapes_per_query": 3, "max_content_chars": 8000},
-    2: {"min_sources": 8,  "max_rounds": 5,  "urls_per_query": 5, "scrapes_per_query": 3, "max_content_chars": 8000},
-    3: {"min_sources": 15, "max_rounds": 7,  "urls_per_query": 5, "scrapes_per_query": 3, "max_content_chars": 10000},
-    4: {"min_sources": 50, "max_rounds": 10, "urls_per_query": 8, "scrapes_per_query": 4, "max_content_chars": 12000},
-    5: {"min_sources": 100,"max_rounds": 10, "urls_per_query": 10,"scrapes_per_query": 5, "max_content_chars": 16000},
+    1: {
+        "min_sources": 3,
+        "max_rounds": 5,
+        "urls_per_query": 5,
+        "scrapes_per_query": 3,
+        "max_content_chars": 8000,
+    },
+    2: {
+        "min_sources": 8,
+        "max_rounds": 5,
+        "urls_per_query": 5,
+        "scrapes_per_query": 3,
+        "max_content_chars": 8000,
+    },
+    3: {
+        "min_sources": 15,
+        "max_rounds": 7,
+        "urls_per_query": 5,
+        "scrapes_per_query": 3,
+        "max_content_chars": 10000,
+    },
+    4: {
+        "min_sources": 50,
+        "max_rounds": 10,
+        "urls_per_query": 8,
+        "scrapes_per_query": 4,
+        "max_content_chars": 12000,
+    },
+    5: {
+        "min_sources": 100,
+        "max_rounds": 10,
+        "urls_per_query": 10,
+        "scrapes_per_query": 5,
+        "max_content_chars": 16000,
+    },
 }
 
 
@@ -71,7 +104,7 @@ def _normalize_url_for_dedupe(url: str) -> str:
 def _extract_search_result_titles(search_results: str) -> dict[str, str]:
     """Extract URL -> title mappings from markdown-formatted search results."""
     titles: dict[str, str] = {}
-    for title, url in re.findall(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', search_results):
+    for title, url in re.findall(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", search_results):
         titles[_normalize_url_for_dedupe(url)] = title.strip()
     return titles
 
@@ -104,24 +137,24 @@ def generate_search_queries(query: str, intensity: int) -> list[str]:
     """Generate search queries based on intensity level."""
     angles = {
         1: ["{query}"],
-        2: ["{query}", "{query} latest", 'opposing view on {query}'],
+        2: ["{query}", "{query} latest", "opposing view on {query}"],
         3: [
             "{query}",
             "{query} latest research 2025 2026",
-            'critique of {query}',
+            "critique of {query}",
             '"{query}" expert analysis',
-            '{query} vs alternatives',
-            '{query} best practices',
-            'problems with {query}',
+            "{query} vs alternatives",
+            "{query} best practices",
+            "problems with {query}",
         ],
         4: [
             "{query}",
             "{query} latest research 2025 2026",
-            'critique of {query}',
+            "critique of {query}",
             '"{query}" expert analysis',
-            '{query} vs alternatives',
-            '{query} best practices',
-            'problems with {query}',
+            "{query} vs alternatives",
+            "{query} best practices",
+            "problems with {query}",
             "{query} detailed analysis",
             "recent developments in {query}",
             "opposing view on {query}",
@@ -131,11 +164,11 @@ def generate_search_queries(query: str, intensity: int) -> list[str]:
         5: [
             "{query}",
             "{query} latest research 2025 2026",
-            'critique of {query}',
+            "critique of {query}",
             '"{query}" expert analysis',
-            '{query} vs alternatives',
-            '{query} best practices',
-            'problems with {query}',
+            "{query} vs alternatives",
+            "{query} best practices",
+            "problems with {query}",
             "{query} detailed analysis",
             "recent developments in {query}",
             "opposing view on {query}",
@@ -194,19 +227,13 @@ def _format_reviewer_feedback(state: ResearchState) -> str:
         return ""
 
     parts: list[str] = []
-    if hasattr(verdict, 'blocking') and verdict.blocking:
-        parts.append(
-            "BLOCKING issues:\n" + "\n".join(f"- {b}" for b in verdict.blocking)
-        )
-    if hasattr(verdict, 'required') and verdict.required:
-        parts.append(
-            "REQUIRED improvements:\n" + "\n".join(f"- {r}" for r in verdict.required)
-        )
-    if hasattr(verdict, 'suggested') and verdict.suggested:
-        parts.append(
-            "SUGGESTED improvements:\n" + "\n".join(f"- {s}" for s in verdict.suggested)
-        )
-    if hasattr(verdict, 'contradicting_evidence_found') and verdict.contradicting_evidence_found:
+    if hasattr(verdict, "blocking") and verdict.blocking:
+        parts.append("BLOCKING issues:\n" + "\n".join(f"- {b}" for b in verdict.blocking))
+    if hasattr(verdict, "required") and verdict.required:
+        parts.append("REQUIRED improvements:\n" + "\n".join(f"- {r}" for r in verdict.required))
+    if hasattr(verdict, "suggested") and verdict.suggested:
+        parts.append("SUGGESTED improvements:\n" + "\n".join(f"- {s}" for s in verdict.suggested))
+    if hasattr(verdict, "contradicting_evidence_found") and verdict.contradicting_evidence_found:
         parts.append(
             "CONTRADICTING EVIDENCE found:\n"
             + "\n".join(f"- {c}" for c in verdict.contradicting_evidence_found)
@@ -262,7 +289,7 @@ def generate_gap_queries_dynamic(
             count=count,
         )
         response = llm.invoke(prompt_text)
-        text = response.content if hasattr(response, 'content') else str(response)
+        text = response.content if hasattr(response, "content") else str(response)
     except Exception:  # noqa: BLE001
         # Fall back to template queries if LLM call fails.
         emit_progress(config, "Researcher: gap query LLM failed, using templates", kind="warning")
@@ -275,15 +302,17 @@ def generate_gap_queries_dynamic(
         if not line:
             continue
         # Strip "1. ", "1) " prefixes only (not content hyphens).
-        line = re.sub(r'^\d+[\.\)]\s*', '', line)
+        line = re.sub(r"^\d+[\.\)]\s*", "", line)
         # Strip bullet markers like "- " and "* " only when followed by non-digit,
         # so "-1 penalty" is preserved but "- something" is stripped.
-        line = re.sub(r'^[-*]\s+(?!\d)', '', line)
+        line = re.sub(r"^[-*]\s+(?!\d)", "", line)
         if line:
             queries.append(line)
 
     if not queries:
-        emit_progress(config, "Researcher: gap query LLM returned no queries, using templates", kind="warning")
+        emit_progress(
+            config, "Researcher: gap query LLM returned no queries, using templates", kind="warning"
+        )
         return generate_gap_queries(query, intensity)
 
     return queries[:count]
@@ -315,7 +344,7 @@ def _scrape_and_collect(
     from ora.tools.scrape import scrape_page
 
     scraped_this_query = 0
-    for url in urls[:params["urls_per_query"]]:
+    for url in urls[: params["urls_per_query"]]:
         if len(sources) >= min_sources and not force_scrape:
             return True
 
@@ -329,7 +358,9 @@ def _scrape_and_collect(
         if _should_skip_url(url):
             display_url = url.replace("https://", "").replace("http://", "")[:80]
             log.append(f"  Skipping known-hostile domain: {url[:80]}")
-            emit_progress(config, f"Researcher: skipping {display_url} (hostile domain)", kind="info")
+            emit_progress(
+                config, f"Researcher: skipping {display_url} (hostile domain)", kind="info"
+            )
             continue
 
         display_url = url.replace("https://", "").replace("http://", "")[:80]
@@ -341,7 +372,9 @@ def _scrape_and_collect(
             emit_progress(config, f"Researcher: scrape failed for {display_url}", kind="error")
             continue
 
-        emit_progress(config, f"Researcher: scraped {len(c)} chars from {display_url}", kind="success")
+        emit_progress(
+            config, f"Researcher: scraped {len(c)} chars from {display_url}", kind="success"
+        )
 
         c = c[:max_content_chars]
 
@@ -351,6 +384,7 @@ def _scrape_and_collect(
             if intensity >= 3:
                 # LLM-powered extraction + evaluation at high intensities.
                 from ora.tools.extract import extract_and_evaluate
+
                 source, extraction = extract_and_evaluate(
                     url=url,
                     title=url_titles.get(normalized_url, ""),
@@ -363,9 +397,11 @@ def _scrape_and_collect(
                 )
                 # Use the LLM-extracted summary as the claim (much richer than c[:500]).
                 claim_text = extraction.summary if extraction.summary else c[:500]
-                log.append(f"  Extracted: {len(extraction.key_claims)} claims, "
-                           f"{len(extraction.recommendations)} recommendations, "
-                           f"reliability={extraction.source_reliability}")
+                log.append(
+                    f"  Extracted: {len(extraction.key_claims)} claims, "
+                    f"{len(extraction.recommendations)} recommendations, "
+                    f"reliability={extraction.source_reliability}"
+                )
             else:
                 # Heuristic evaluation for cost efficiency at low intensities.
                 source = evaluate_source(
@@ -378,7 +414,9 @@ def _scrape_and_collect(
                 claim_text = c[:500]
         except Exception as e:  # noqa: BLE001
             log.append(f"  Source eval failed from {url[:60]}: {e}")
-            emit_progress(config, f"Researcher: source evaluation failed for {display_url}", kind="error")
+            emit_progress(
+                config, f"Researcher: source evaluation failed for {display_url}", kind="error"
+            )
             source = Source(
                 url=url,
                 title="",
@@ -413,9 +451,7 @@ def _scrape_and_collect(
     return len(sources) >= min_sources
 
 
-def researcher_node(
-    state: ResearchState, config: RunnableConfig | None = None
-) -> dict[str, Any]:
+def researcher_node(state: ResearchState, config: RunnableConfig | None = None) -> dict[str, Any]:
     """Researcher: iterate until min_sources target is reached.
 
     Synchronous node -- uses blocking HTTP calls inside LangGraph's sync execution.
@@ -441,9 +477,7 @@ def researcher_node(
     prior_source_count = len(sources)
     prior_finding_count = len(findings)
     seen_urls = {
-        _normalize_url_for_dedupe(source.url)
-        for source in sources
-        if hasattr(source, "url")
+        _normalize_url_for_dedupe(source.url) for source in sources if hasattr(source, "url")
     }
     log: list[str] = []
 
@@ -565,9 +599,19 @@ def researcher_node(
             )
 
             if _scrape_and_collect(
-                urls, params, max_content_chars, config, log,
-                sources, findings, seen_urls, url_titles, min_sources=min_sources,
-                query=query, intensity=intensity, model_name=model_name,
+                urls,
+                params,
+                max_content_chars,
+                config,
+                log,
+                sources,
+                findings,
+                seen_urls,
+                url_titles,
+                min_sources=min_sources,
+                query=query,
+                intensity=intensity,
+                model_name=model_name,
                 force_scrape=revise_round,
             ):
                 # force_scrape suppresses _scrape_and_collect's internal
@@ -583,10 +627,12 @@ def researcher_node(
 
     if not findings:
         results_text = web_search.invoke({"query": query})
-        findings.append(Finding(
-            claim=f"No scraped content found. Raw search: {results_text[:300]}",
-            confidence="Unknown",
-        ))
+        findings.append(
+            Finding(
+                claim=f"No scraped content found. Raw search: {results_text[:300]}",
+                confidence="Unknown",
+            )
+        )
 
     research_status = "final" if len(sources) >= min_sources else "interim"
 
