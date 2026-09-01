@@ -101,8 +101,7 @@ def load_config(config_path: str | None = None) -> ORASettings:
                 settings.provider = ProviderDefaultSettings(**yaml_data["provider"])
             if "providers" in yaml_data:
                 settings.providers = {
-                    name: ProviderSettings(**cfg)
-                    for name, cfg in yaml_data["providers"].items()
+                    name: ProviderSettings(**cfg) for name, cfg in yaml_data["providers"].items()
                 }
             elif "deepseek_base_url" in yaml_data:
                 # Legacy config: no providers map, honor the old flat key.
