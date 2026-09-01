@@ -104,11 +104,14 @@ class TestProviders:
                 "  openrouter:\n"
                 "    base_url: https://openrouter.ai/api/v1\n"
                 "    api_key_env: OR_API_KEY\n"
+                "    headers:\n"
+                "      X-Title: Test\n"
             )
             f.flush()
             config = load_config(f.name)
             assert config.provider.default == "openrouter"
             assert config.providers["openrouter"].api_key_env == "OR_API_KEY"
+            assert config.providers["openrouter"].headers["X-Title"] == "Test"
             os.unlink(f.name)
 
     def test_legacy_deepseek_base_url_migrates_without_providers_section(self):
@@ -136,3 +139,8 @@ class TestProviders:
         monkeypatch.setenv("ORA_PROVIDER__DEFAULT", "openrouter")
         settings = ORASettings()
         assert settings.provider.default == "openrouter"
+
+    def test_env_legacy_deepseek_base_url_applies_when_no_providers_configured(self, monkeypatch):
+        monkeypatch.setenv("ORA_DEEPSEEK_BASE_URL", "https://env-legacy.example.com")
+        config = load_config("/nonexistent-config.yaml")
+        assert config.deepseek_base_url == "https://env-legacy.example.com"

@@ -78,7 +78,8 @@ DEFAULT_PROVIDERS: dict[str, ProviderSettings] = {
 def load_config(config_path: str | None = None) -> ORASettings:
     """Load ORA configuration from YAML file and environment.
 
-    Priority: env vars > YAML file > defaults.
+    Priority: YAML file > env vars > defaults (fields present in the YAML
+    file override env-var values).
     """
     settings = ORASettings()
 
