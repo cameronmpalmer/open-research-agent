@@ -141,17 +141,38 @@ Use `--output` to choose a specific path, or `--no-save` to print the report wit
 
 ORA requires **Python 3.10**. Later versions (3.11+) may encounter incompatibilities with the LangChain/LangGraph ecosystem.
 
-Install development dependencies:
+The repository ships a `Makefile` that manages a local virtual environment automatically. From a clean clone:
 
 ```bash
-pip install -e ".[dev]"
+make setup
 ```
 
-Run tests:
+Run the test suite (pass `T=tests/path` for a focused file, `ARGS="-x -q"` for pytest options):
 
 ```bash
-pytest
+make test
 ```
+
+Lint and auto-format:
+
+```bash
+make lint
+make format
+```
+
+Build the package (wheel and sdist into `dist/`):
+
+```bash
+make build
+```
+
+Run a research task from the Makefile. Reports are saved to `reports/` by default:
+
+```bash
+make research QUERY="What are the tradeoffs between Rust and Go for backend services?"
+```
+
+`make research QUERY="..." INTENSITY=4` runs at a higher intensity level; `OUTPUT=path.md` overrides the output path. `make plan QUERY="..."` previews a research plan without running it. `make check` runs lint then tests. See `make help` for the full target list.
 
 Run the CLI locally:
 

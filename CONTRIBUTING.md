@@ -36,13 +36,21 @@ If you are new to contributing to open source, here is the standard workflow. OR
 
 ## Development setup
 
-Use Python 3.10.
+Use Python 3.10. The repository ships a `Makefile` that manages a local virtual environment:
+
+```bash
+make setup
+```
+
+This creates `.venv` (if needed) and installs the package with dev dependencies. Equivalent manual steps:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
+
+If dependencies change and `make` does not pick them up (or you want a clean slate), reset the environment with `make clean-venv` and re-run `make setup`.
 
 ## Configuration for local runs
 
@@ -62,13 +70,19 @@ open-research-agent config --init
 ## Run tests
 
 ```bash
-pytest
+make test
 ```
 
 For CLI-focused changes:
 
 ```bash
-python3 -m pytest tests/test_cli.py -q
+make test T=tests/test_cli.py
+```
+
+Run lint before opening a pull request:
+
+```bash
+make lint
 ```
 
 ## Run the CLI locally
