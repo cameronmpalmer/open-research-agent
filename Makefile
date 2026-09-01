@@ -15,7 +15,7 @@ INTENSITY ?= 2
 TIMESTAMP := $(shell date +%Y-%m-%d-%H%M%S)
 OUTPUT    ?= reports/ora-$(TIMESTAMP).md
 
-.PHONY: help setup test lint format build check plan research clean clean-venv
+.PHONY: help setup test lint format build check precommit install-hooks plan research clean clean-venv
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_.-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -41,6 +41,12 @@ build: $(VENV)/.stamp ## Build wheel and sdist into dist/
 	$(PYTHON) -m build
 
 check: lint test ## Run lint then tests (pre-PR gate)
+
+precommit: lint test build ## Run lint, tests, and build before committing
+
+install-hooks: ## Install the git pre-commit hook (core.hooksPath)
+	git config core.hooksPath .githooks
+	@echo "Pre-commit hook installed."
 
 plan: $(VENV)/.stamp ## Preview a research plan: make plan QUERY="..."
 	@test -n "$(QUERY)" || (echo "QUERY is required. Usage: make plan QUERY=\"your research question\""; exit 1)

@@ -174,6 +174,14 @@ make research QUERY="What are the tradeoffs between Rust and Go for backend serv
 
 `make research QUERY="..." INTENSITY=4` runs at a higher intensity level; `OUTPUT=path.md` overrides the output path. `make plan QUERY="..."` previews a research plan without running it. `make check` runs lint then tests. See `make help` for the full target list.
 
+Install the git pre-commit hook (run once per clone):
+
+```bash
+make install-hooks
+```
+
+The hook runs `make precommit` (lint, tests, and build) before every commit. Bypass it for a quick commit with `git commit --no-verify`.
+
 Run the CLI locally:
 
 ```bash

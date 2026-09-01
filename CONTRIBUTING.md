@@ -52,6 +52,8 @@ pip install -e ".[dev]"
 
 If dependencies change and `make` does not pick them up (or you want a clean slate), reset the environment with `make clean-venv` and re-run `make setup`.
 
+Install the git pre-commit hook once per clone with `make install-hooks`. It runs `make precommit` (lint, tests, and build) before every commit; bypass with `git commit --no-verify`.
+
 ## Configuration for local runs
 
 ORA 0.1.0 currently supports the DeepSeek API as its LLM backend and Firecrawl for search and scraping.
