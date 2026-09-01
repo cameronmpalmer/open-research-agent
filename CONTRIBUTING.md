@@ -113,6 +113,6 @@ Do not commit API keys, `.env` files, credentials, or generated files containing
 Before opening a pull request:
 
 1. Run the relevant focused tests.
-2. Run the full test suite with `pytest`.
+2. Run the full test suite with `make test`.
 3. Check `git status --short` for generated reports or other accidental files.
 4. Update documentation when behavior changes.
