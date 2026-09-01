@@ -143,6 +143,15 @@ class TestCLI:
         assert "Deep" in result.output
         assert "Exhaustive" in result.output
 
+    def test_config_init_creates_file(self, tmp_path):
+        """config --init must create ~/.ora/config.yaml on a fresh HOME."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["config", "--init"], env={"HOME": str(tmp_path)})
+
+        assert result.exit_code == 0
+        assert "Config created" in result.output
+        assert (tmp_path / ".ora" / "config.yaml").exists()
+
     def test_research_without_query_fails(self):
         runner = CliRunner()
         result = runner.invoke(main, ["research"])

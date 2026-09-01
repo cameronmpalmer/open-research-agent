@@ -340,8 +340,8 @@ def config(show, init):
     """Show or initialize ORA configuration."""
     config_path = os.path.expanduser("~/.ora/config.yaml")
 
-    if init and os.path.exists(config_path):
-        if not click.confirm(
+    if init:
+        if os.path.exists(config_path) and not click.confirm(
             f"Config already exists at {config_path}. Overwrite?", prompt_suffix=" [y/n]: "
         ):
             click.echo("Aborted.")
