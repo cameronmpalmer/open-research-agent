@@ -61,6 +61,7 @@ ORA supports the DeepSeek API and OpenRouter as LLM backends, and Firecrawl for 
 ```bash
 export DEEPSEEK_API_KEY="your-deepseek-api-key"
 export FIRECRAWL_API_KEY="your-firecrawl-api-key"
+export OPENROUTER_API_KEY="your-openrouter-api-key"  # only if using OpenRouter models
 ```
 
 You can create a local config file with:
