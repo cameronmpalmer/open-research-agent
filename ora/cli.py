@@ -1,4 +1,5 @@
 """Click CLI for Open Research Agent (ORA)."""
+
 import logging
 import os
 import re
@@ -7,6 +8,7 @@ from datetime import datetime
 
 import click
 import yaml
+
 from ora.config import get_researcher_model, load_config
 
 logging.captureWarnings(True)
@@ -32,9 +34,9 @@ def _spin(func, message="Working..."):
     The status message cycles its trailing dots (., .., ...) while
     the function runs in a background thread.
     """
-    from rich.console import Console
     import threading
-    import time
+
+    from rich.console import Console
 
     base = message.rstrip(".")
 
@@ -46,7 +48,7 @@ def _spin(func, message="Working..."):
         nonlocal result, exception
         try:
             result = func()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             exception = exc
         finally:
             done.set()
@@ -74,6 +76,7 @@ def _print_markdown(text: str):
     from rich.console import Console
     from rich.markdown import Markdown
     from rich.style import Style
+
     console = Console(style=Style(bgcolor=None))
     console.print(Markdown(text))
 
@@ -106,43 +109,70 @@ def main():
     Submit a query, get back calibrated, source-traced research that
     has been audited by a separate adversarial agent.
     """
-    pass
 
 
 @main.command()
 @click.argument("query")
-@click.option("--intensity", "-i", type=click.IntRange(1, 5), default=2,
-              help="Research intensity (1=Quick, 2=Standard, 3=Thorough, 4=Deep, 5=Exhaustive)")
-@click.option("--output", "-o", type=click.Path(), default=None,
-              help="Explicit output file path (overrides auto-named save)")
-@click.option("--stdout", is_flag=True,
-              help="Also print the report to stdout")
-@click.option("--no-save", is_flag=True,
-              help="Do not save to file; print to stdout only")
-@click.option("--model", "-m", default=None,
-              help="LLM model for researcher/writer (e.g., deepseek-v4-flash)")
-@click.option("--reviewer-model", "-r", default=None,
-              help="LLM model for adversarial reviewer")
-@click.option("--max-revisions", type=int, default=3,
-               help="Max writer-reviewer revision cycles")
-@click.option("--no-review", is_flag=True,
-               help="Skip adversarial review")
-@click.option("--quiet", is_flag=True,
-              help="Disable live progress indicators and use spinner-only output")
+@click.option(
+    "--intensity",
+    "-i",
+    type=click.IntRange(1, 5),
+    default=2,
+    help="Research intensity (1=Quick, 2=Standard, 3=Thorough, 4=Deep, 5=Exhaustive)",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(),
+    default=None,
+    help="Explicit output file path (overrides auto-named save)",
+)
+@click.option("--stdout", is_flag=True, help="Also print the report to stdout")
+@click.option("--no-save", is_flag=True, help="Do not save to file; print to stdout only")
+@click.option(
+    "--model", "-m", default=None, help="LLM model for researcher/writer (e.g., deepseek-v4-flash)"
+)
+@click.option("--reviewer-model", "-r", default=None, help="LLM model for adversarial reviewer")
+@click.option("--max-revisions", type=int, default=3, help="Max writer-reviewer revision cycles")
+@click.option("--no-review", is_flag=True, help="Skip adversarial review")
+@click.option(
+    "--quiet", is_flag=True, help="Disable live progress indicators and use spinner-only output"
+)
 @click.option("--verbose", is_flag=True, hidden=True)
-@click.option("-y", "--auto-approve", is_flag=True,
-              help="Auto-approve the research plan and execute immediately")
-@click.option("--hide-plan-on-autoapprove", is_flag=True,
-              help="Suppress plan output when --auto-approve is used")
-def research(query, intensity, output, model, reviewer_model, max_revisions,
-             no_review, quiet, verbose, stdout, no_save, auto_approve,
-             hide_plan_on_autoapprove):
+@click.option(
+    "-y",
+    "--auto-approve",
+    is_flag=True,
+    help="Auto-approve the research plan and execute immediately",
+)
+@click.option(
+    "--hide-plan-on-autoapprove",
+    is_flag=True,
+    help="Suppress plan output when --auto-approve is used",
+)
+def research(
+    query,
+    intensity,
+    output,
+    model,
+    reviewer_model,
+    max_revisions,
+    no_review,
+    quiet,
+    verbose,
+    stdout,
+    no_save,
+    auto_approve,
+    hide_plan_on_autoapprove,
+):
     """Run the full research pipeline."""
     click.echo(f"ORA Research: {query}")
     settings = load_config()
     researcher_model_name = model or settings.models.researcher or settings.models.default
     reviewer_model_name = reviewer_model or settings.models.reviewer or "deepseek-v4-pro"
-    click.echo(f"  Intensity: {intensity} | Researcher: {researcher_model_name} | Reviewer: {reviewer_model_name}")
+    click.echo(
+        f"  Intensity: {intensity} | Researcher: {researcher_model_name} | Reviewer: {reviewer_model_name}"
+    )
 
     if model:
         settings.models.researcher = model
@@ -160,15 +190,19 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
         "revision_count": 0,
     }
 
-    plan_result = _spin(lambda: plan_graph.invoke(initial_state), message="Generating research plan...")
+    plan_result = _spin(
+        lambda: plan_graph.invoke(initial_state), message="Generating research plan..."
+    )
     plan = plan_result.get("research_plan", "No plan generated.")
 
     # Warn if supervisor provided a search_queries fence but parsing failed
     from ora.agents.supervisor import _search_queries_fence_found
+
     if _search_queries_fence_found(plan) and not plan_result.get("search_queries"):
         click.echo(
             "  ⚠️  Supervisor provided a search_queries block but queries could not"
-            " be parsed; falling back to default search queries.", err=True,
+            " be parsed; falling back to default search queries.",
+            err=True,
         )
 
     if not (auto_approve and hide_plan_on_autoapprove):
@@ -177,7 +211,7 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     if auto_approve:
         click.echo()
     else:
-        from ora.agents.supervisor import revise_plan_text, _extract_search_queries
+        from ora.agents.supervisor import _extract_search_queries, revise_plan_text
 
         while True:
             choice = click.prompt(
@@ -201,18 +235,24 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
                 plan = plan_result["research_plan"] = edited.rstrip("\n") + "\n"
                 plan_result["search_queries"] = _extract_search_queries(plan)
                 if not plan_result["search_queries"] and _search_queries_fence_found(plan):
-                    click.echo("  ⚠️  Supervisor search_queries block found but could not be parsed; falling back to template-generated queries")
+                    click.echo(
+                        "  ⚠️  Supervisor search_queries block found but could not be parsed; falling back to template-generated queries"
+                    )
                 _print_markdown(plan)
             elif choice == "R":
                 feedback = click.prompt("  Feedback for supervisor")
                 plan, queries = _spin(
-                    lambda: revise_plan_text(query, intensity, plan, feedback),
+                    lambda plan=plan, feedback=feedback: revise_plan_text(
+                        query, intensity, plan, feedback
+                    ),
                     message="Revising plan...",
                 )
                 plan_result["research_plan"] = plan
                 plan_result["search_queries"] = queries
                 if not queries and _search_queries_fence_found(plan):
-                    click.echo("  ⚠️  Supervisor search_queries block found but could not be parsed; falling back to template-generated queries")
+                    click.echo(
+                        "  ⚠️  Supervisor search_queries block found but could not be parsed; falling back to template-generated queries"
+                    )
                 _print_markdown(plan)
 
     # Phase 2: Run research pipeline
@@ -236,13 +276,20 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
     sources_count = len(final_state.get("sources") or [])
     findings_count = len(final_state.get("findings") or [])
     draft_len = len(final_state.get("draft_report") or "")
-    click.echo(f"  Sources: {sources_count} | Findings: {findings_count} | Draft: {draft_len} chars")
+    click.echo(
+        f"  Sources: {sources_count} | Findings: {findings_count} | Draft: {draft_len} chars"
+    )
 
     if not final_state.get("draft_report"):
-        click.echo("  ⚠️  No report was generated. Check your Firecrawl and API key configuration.", err=True)
+        click.echo(
+            "  ⚠️  No report was generated. Check your Firecrawl and API key configuration.",
+            err=True,
+        )
         return
 
-    draft = final_state.get("final_report") or final_state.get("draft_report", "No report generated.")
+    draft = final_state.get("final_report") or final_state.get(
+        "draft_report", "No report generated."
+    )
 
     # Determine output path
     save_path = output or (None if no_save else _auto_filename(query))
@@ -261,17 +308,26 @@ def research(query, intensity, output, model, reviewer_model, max_revisions,
 
 @main.command()
 @click.argument("query")
-@click.option("--intensity", "-i", type=click.IntRange(1, 5), default=2,
-              help="Research intensity (1=Quick, 2=Standard, 3=Thorough, 4=Deep, 5=Exhaustive)")
+@click.option(
+    "--intensity",
+    "-i",
+    type=click.IntRange(1, 5),
+    default=2,
+    help="Research intensity (1=Quick, 2=Standard, 3=Thorough, 4=Deep, 5=Exhaustive)",
+)
 def plan(query, intensity):
     """Generate a research plan without executing research."""
 
     from ora.graph import build_plan_graph
+
     graph = build_plan_graph()
 
-    result = _spin(lambda: graph.invoke(
-        {"query": query, "intensity": intensity, "plan_approved": False, "revision_count": 0},
-    ), message="Generating research plan...")
+    result = _spin(
+        lambda: graph.invoke(
+            {"query": query, "intensity": intensity, "plan_approved": False, "revision_count": 0},
+        ),
+        message="Generating research plan...",
+    )
     plan_text = result.get("research_plan", "No plan generated.")
     click.echo(f"\nResearch Plan for: {query}\n")
     _print_markdown(plan_text)
@@ -285,10 +341,11 @@ def config(show, init):
     config_path = os.path.expanduser("~/.ora/config.yaml")
 
     if init:
-        if os.path.exists(config_path):
-            if not click.confirm(f"Config already exists at {config_path}. Overwrite?", prompt_suffix=" [y/n]: "):
-                click.echo("Aborted.")
-                return
+        if os.path.exists(config_path) and not click.confirm(
+            f"Config already exists at {config_path}. Overwrite?", prompt_suffix=" [y/n]: "
+        ):
+            click.echo("Aborted.")
+            return
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
         default_config = {
             "models": {
@@ -311,9 +368,13 @@ def config(show, init):
     settings = load_config()
     click.echo(f"Config file: {config_path}")
     click.echo()
-    click.echo(f"Supervisor (planning & routing): {settings.models.supervisor or 'deepseek-v4-pro'}")
+    click.echo(
+        f"Supervisor (planning & routing): {settings.models.supervisor or 'deepseek-v4-pro'}"
+    )
     click.echo(f"Researcher (web search & source eval): {get_researcher_model(settings)}")
-    click.echo(f"Writer (report synthesis): {settings.models.researcher or settings.models.default}")
+    click.echo(
+        f"Writer (report synthesis): {settings.models.researcher or settings.models.default}"
+    )
     click.echo(f"Reviewer (adversarial audit): {settings.models.reviewer or 'deepseek-v4-pro'}")
     click.echo()
     click.echo(f"Search backend: {settings.search.provider}")
@@ -327,11 +388,15 @@ def config(show, init):
     reviewer_on = {3, 4, 5}
     click.echo("Intensity Levels")
     click.echo(f"{'Level':<6} {'Label':<12} {'Min Sources':<12} {'Max Rounds':<10} {'Reviewer':<9}")
-    click.echo(f"{'-----':<6} {'----------':<12} {'-----------':<12} {'----------':<10} {'--------':<9}")
+    click.echo(
+        f"{'-----':<6} {'----------':<12} {'-----------':<12} {'----------':<10} {'--------':<9}"
+    )
     for level in [1, 2, 3, 4, 5]:
         p = LEVEL_PARAMS[level]
         reviewer = "Yes" if level in reviewer_on else "No"
-        click.echo(f"{level:<6} {labels[level]:<12} {p['min_sources']:<12} {p['max_rounds']:<10} {reviewer:<9}")
+        click.echo(
+            f"{level:<6} {labels[level]:<12} {p['min_sources']:<12} {p['max_rounds']:<10} {reviewer:<9}"
+        )
 
 
 if __name__ == "__main__":

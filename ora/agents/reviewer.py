@@ -1,10 +1,13 @@
 """Adversarial reviewer agent node for LangGraph."""
+
 import json
 from typing import Any
+
 from langchain_core.runnables import RunnableConfig
-from ora.state import ResearchState, ReviewVerdict
+
+from ora.config import get_llm, get_reviewer_model, load_config
 from ora.prompts import REVIEWER_PROMPT
-from ora.config import load_config, get_reviewer_model, get_llm
+from ora.state import ResearchState, ReviewVerdict
 
 
 def parse_reviewer_output(output: str) -> ReviewVerdict:
@@ -37,13 +40,11 @@ def parse_reviewer_output(output: str) -> ReviewVerdict:
     except (json.JSONDecodeError, ValueError, KeyError) as e:
         return ReviewVerdict(
             verdict="REVISE",
-            blocking=[f"Reviewer output parsing failed: {str(e)}. Raw: {output[:200]}"],
+            blocking=[f"Reviewer output parsing failed: {e!s}. Raw: {output[:200]}"],
         )
 
 
-def reviewer_node(
-    state: ResearchState, config: RunnableConfig = None
-) -> dict[str, Any]:
+def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[str, Any]:
     """Adversarial reviewer LangGraph node.
 
     Receives the draft report and original query. Does NOT receive the
@@ -65,11 +66,11 @@ def reviewer_node(
     )
 
     response = llm.invoke(prompt_text)
-    output = response.content if hasattr(response, 'content') else str(response)
+    output = response.content if hasattr(response, "content") else str(response)
 
     verdict = parse_reviewer_output(output)
 
-    v = verdict.verdict if hasattr(verdict, 'verdict') else "PASS"
+    v = verdict.verdict if hasattr(verdict, "verdict") else "PASS"
     if v == "REVISE":
         emit_progress(
             config,

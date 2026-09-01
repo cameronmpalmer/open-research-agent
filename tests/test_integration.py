@@ -1,4 +1,5 @@
 """Integration smoke test for the full ORA pipeline."""
+
 from ora.graph import build_graph
 from ora.state import ResearchState, ReviewVerdict
 
@@ -21,16 +22,20 @@ class TestFullPipeline:
 
     def test_reviewer_blocks_broken_urls(self):
         """Adversarial reviewer should catch broken URLs."""
-        from ora.agents.reviewer import parse_reviewer_output
         import json
-        output = json.dumps({
-            "verdict": "REVISE",
-            "blocking": ["URL https://example.com/fake returns 404"],
-            "required": [],
-            "suggested": [],
-            "contradicting_evidence_found": [],
-            "confidence_recalibrations": {},
-        })
+
+        from ora.agents.reviewer import parse_reviewer_output
+
+        output = json.dumps(
+            {
+                "verdict": "REVISE",
+                "blocking": ["URL https://example.com/fake returns 404"],
+                "required": [],
+                "suggested": [],
+                "contradicting_evidence_found": [],
+                "confidence_recalibrations": {},
+            }
+        )
         verdict = parse_reviewer_output(output)
         assert verdict.verdict == "REVISE"
         assert len(verdict.blocking) == 1
@@ -38,16 +43,20 @@ class TestFullPipeline:
 
     def test_reviewer_passes_clean_report(self):
         """Adversarial reviewer should pass a clean report."""
-        from ora.agents.reviewer import parse_reviewer_output
         import json
-        output = json.dumps({
-            "verdict": "PASS",
-            "blocking": [],
-            "required": ["minor: add one more source"],
-            "suggested": ["add examples"],
-            "contradicting_evidence_found": [],
-            "confidence_recalibrations": {},
-        })
+
+        from ora.agents.reviewer import parse_reviewer_output
+
+        output = json.dumps(
+            {
+                "verdict": "PASS",
+                "blocking": [],
+                "required": ["minor: add one more source"],
+                "suggested": ["add examples"],
+                "contradicting_evidence_found": [],
+                "confidence_recalibrations": {},
+            }
+        )
         verdict = parse_reviewer_output(output)
         assert verdict.verdict == "PASS"
         assert len(verdict.blocking) == 0
@@ -57,8 +66,8 @@ class TestFullPipeline:
         from ora.agents.supervisor import (
             route_after_plan,
             route_after_researcher,
-            route_after_writer,
             route_after_reviewer,
+            route_after_writer,
         )
 
         # Plan -> Researcher
@@ -74,7 +83,17 @@ class TestFullPipeline:
         assert route_after_writer({"draft_report": ""}) == "__end__"
 
         # Reviewer -> End or Loop
-        assert route_after_reviewer({"review_verdict": ReviewVerdict(verdict="PASS"), "revision_count": 0}) == "__end__"
+        assert (
+            route_after_reviewer(
+                {"review_verdict": ReviewVerdict(verdict="PASS"), "revision_count": 0}
+            )
+            == "__end__"
+        )
         rev_verdict = ReviewVerdict(verdict="REVISE")
-        assert route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 0}) == "researcher"
-        assert route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 3}) == "__end__"
+        assert (
+            route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 0})
+            == "researcher"
+        )
+        assert (
+            route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 3}) == "__end__"
+        )

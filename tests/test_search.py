@@ -1,4 +1,5 @@
 """Tests for Firecrawl search tool."""
+
 from ora.tools.search import web_search
 
 

@@ -1,10 +1,12 @@
 """Per-source LLM extraction and evaluation."""
+
 import json
-from typing import Optional
+
 from langchain_core.runnables import RunnableConfig
-from ora.state import Source, SourceExtraction
+
+from ora.config import get_llm, load_config
 from ora.prompts import EXTRACTOR_PROMPT
-from ora.config import load_config, get_llm
+from ora.state import Source, SourceExtraction
 from ora.tools.evaluate import evaluate_source as evaluate_heuristic
 
 
@@ -14,7 +16,7 @@ def extract_and_evaluate(
     content: str = "",
     source_type: str = "unknown",
     query: str = "",
-    config: Optional[RunnableConfig] = None,
+    config: RunnableConfig | None = None,
     max_chars: int = 6000,
     model_name: str = "",
 ) -> tuple[Source, SourceExtraction]:
@@ -57,8 +59,8 @@ def extract_and_evaluate(
     try:
         llm = get_llm(model_name, temperature=0.1)
         response = llm.invoke(prompt_text)
-        text = response.content if hasattr(response, 'content') else str(response)
-    except Exception:
+        text = response.content if hasattr(response, "content") else str(response)
+    except Exception:  # noqa: BLE001
         emit_progress(
             config,
             f"Extractor: LLM call failed for {url[:60]}, falling back to heuristic",

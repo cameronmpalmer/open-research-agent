@@ -1,6 +1,7 @@
 """Configuration loading via YAML, env vars, and pydantic-settings."""
+
 import os
-from typing import Optional
+
 import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,15 +14,15 @@ class LimitSettings(BaseModel):
 
 class SearchSettings(BaseModel):
     provider: str = "firecrawl"
-    firecrawl_api_key: Optional[str] = None
+    firecrawl_api_key: str | None = None
     firecrawl_api_url: str = "https://api.firecrawl.com"
 
 
 class ModelSettings(BaseModel):
     default: str = "deepseek-v4-flash"
-    researcher: Optional[str] = None
-    supervisor: Optional[str] = None
-    reviewer: Optional[str] = "deepseek-v4-pro"
+    researcher: str | None = None
+    supervisor: str | None = None
+    reviewer: str | None = "deepseek-v4-pro"
 
 
 class OutputSettings(BaseModel):
@@ -46,7 +47,7 @@ class ORASettings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
 
 
-def load_config(config_path: Optional[str] = None) -> ORASettings:
+def load_config(config_path: str | None = None) -> ORASettings:
     """Load ORA configuration from YAML file and environment.
 
     Priority: env vars > YAML file > defaults.
@@ -98,12 +99,8 @@ def get_firecrawl_client():
     from firecrawl import FirecrawlApp
 
     settings = load_config()
-    api_key = os.environ.get(
-        "FIRECRAWL_API_KEY", settings.search.firecrawl_api_key or ""
-    )
-    api_url = os.environ.get(
-        "FIRECRAWL_API_URL", settings.search.firecrawl_api_url
-    )
+    api_key = os.environ.get("FIRECRAWL_API_KEY", settings.search.firecrawl_api_key or "")
+    api_url = os.environ.get("FIRECRAWL_API_URL", settings.search.firecrawl_api_url)
     return FirecrawlApp(api_key=api_key, api_url=api_url)
 
 
@@ -118,13 +115,12 @@ def get_llm(model_name: str, temperature: float = 0.0):
     settings = load_config()
     api_key = os.environ.get("DEEPSEEK_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
     if not api_key:
-        raise ValueError(
-            "No API key configured. Set DEEPSEEK_API_KEY or OPENAI_API_KEY."
-        )
+        raise ValueError("No API key configured. Set DEEPSEEK_API_KEY or OPENAI_API_KEY.")
 
     clean_name = model_name.split(":", 1)[-1] if ":" in model_name else model_name
     if clean_name != model_name:
         import warnings
+
         warnings.warn(
             f"Model name '{model_name}' contains a provider prefix which is"
             f" ignored (ORA connects to the configured base URL, currently"

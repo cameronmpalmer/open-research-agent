@@ -1,11 +1,13 @@
 """Tests for per-source LLM extraction."""
+
 import json
+
 from ora.tools.extract import extract_and_evaluate
-from ora.state import SourceExtraction
 
 
 class FakeLLM:
     """Returns a valid JSON extraction."""
+
     def __init__(self, extraction_dict):
         self._dict = extraction_dict
 
@@ -22,17 +24,19 @@ def test_extract_and_evaluate_returns_structured_data(monkeypatch):
     with the LLM's extracted content."""
     monkeypatch.setattr(
         "ora.tools.extract.get_llm",
-        lambda *a, **kw: FakeLLM({
-            "summary": "This page recommends the Brilliant Cut Grinder as the best overall option.",
-            "key_claims": ["Brilliant Cut Grinder uses Aerospace 7075 Aluminum"],
-            "recommendations": ["Buy the Brilliant Cut Grinder for $88"],
-            "named_entities": ["Brilliant Cut Grinder", "Grinders For Life"],
-            "data_points": ["$88", "7075 Aluminum"],
-            "comparisons": ["Brilliant Cut vs Santa Cruz Shredder"],
-            "criticisms": ["Expensive compared to budget options"],
-            "source_reliability": "High",
-            "reliability_rationale": "Established reviewer with methodology."
-        }),
+        lambda *a, **kw: FakeLLM(
+            {
+                "summary": "This page recommends the Brilliant Cut Grinder as the best overall option.",
+                "key_claims": ["Brilliant Cut Grinder uses Aerospace 7075 Aluminum"],
+                "recommendations": ["Buy the Brilliant Cut Grinder for $88"],
+                "named_entities": ["Brilliant Cut Grinder", "Grinders For Life"],
+                "data_points": ["$88", "7075 Aluminum"],
+                "comparisons": ["Brilliant Cut vs Santa Cruz Shredder"],
+                "criticisms": ["Expensive compared to budget options"],
+                "source_reliability": "High",
+                "reliability_rationale": "Established reviewer with methodology.",
+            }
+        ),
     )
 
     source, extraction = extract_and_evaluate(
@@ -64,6 +68,7 @@ def test_extract_and_evaluate_falls_back_on_json_error(monkeypatch):
         class _Response:
             def __init__(self, content="not valid json at all, just prose"):
                 self.content = content
+
         def invoke(self, _prompt):
             return self._Response()
 
@@ -106,17 +111,19 @@ def test_extract_and_evaluate_maps_reliability_to_craap(monkeypatch):
     """High reliability should produce high CRAAP dimension scores."""
     monkeypatch.setattr(
         "ora.tools.extract.get_llm",
-        lambda *a, **kw: FakeLLM({
-            "summary": "Test.",
-            "key_claims": [],
-            "recommendations": [],
-            "named_entities": [],
-            "data_points": [],
-            "comparisons": [],
-            "criticisms": [],
-            "source_reliability": "High",
-            "reliability_rationale": "Trusted source."
-        }),
+        lambda *a, **kw: FakeLLM(
+            {
+                "summary": "Test.",
+                "key_claims": [],
+                "recommendations": [],
+                "named_entities": [],
+                "data_points": [],
+                "comparisons": [],
+                "criticisms": [],
+                "source_reliability": "High",
+                "reliability_rationale": "Trusted source.",
+            }
+        ),
     )
 
     source, _ = extract_and_evaluate(
@@ -135,17 +142,19 @@ def test_extract_and_evaluate_maps_medium_reliability_to_craap(monkeypatch):
     """Medium reliability should produce mid-range CRAAP dimension scores."""
     monkeypatch.setattr(
         "ora.tools.extract.get_llm",
-        lambda *a, **kw: FakeLLM({
-            "summary": "Test.",
-            "key_claims": [],
-            "recommendations": [],
-            "named_entities": [],
-            "data_points": [],
-            "comparisons": [],
-            "criticisms": [],
-            "source_reliability": "Medium",
-            "reliability_rationale": "Decent source."
-        }),
+        lambda *a, **kw: FakeLLM(
+            {
+                "summary": "Test.",
+                "key_claims": [],
+                "recommendations": [],
+                "named_entities": [],
+                "data_points": [],
+                "comparisons": [],
+                "criticisms": [],
+                "source_reliability": "Medium",
+                "reliability_rationale": "Decent source.",
+            }
+        ),
     )
 
     source, _ = extract_and_evaluate(
@@ -163,17 +172,19 @@ def test_extract_and_evaluate_maps_low_reliability_to_craap(monkeypatch):
     """Low reliability should produce low CRAAP dimension scores."""
     monkeypatch.setattr(
         "ora.tools.extract.get_llm",
-        lambda *a, **kw: FakeLLM({
-            "summary": "Test.",
-            "key_claims": [],
-            "recommendations": [],
-            "named_entities": [],
-            "data_points": [],
-            "comparisons": [],
-            "criticisms": [],
-            "source_reliability": "Low",
-            "reliability_rationale": "Biased source."
-        }),
+        lambda *a, **kw: FakeLLM(
+            {
+                "summary": "Test.",
+                "key_claims": [],
+                "recommendations": [],
+                "named_entities": [],
+                "data_points": [],
+                "comparisons": [],
+                "criticisms": [],
+                "source_reliability": "Low",
+                "reliability_rationale": "Biased source.",
+            }
+        ),
     )
 
     source, _ = extract_and_evaluate(
@@ -192,8 +203,12 @@ def test_extract_and_evaluate_handles_markdown_fences(monkeypatch):
 
     class FencedLLM:
         class _Response:
-            def __init__(self, content='```json\n{"summary": "test", "key_claims": ["claim 1"], "recommendations": [], "named_entities": [], "data_points": [], "comparisons": [], "criticisms": [], "source_reliability": "Medium", "reliability_rationale": "ok"}\n```'):
+            def __init__(
+                self,
+                content='```json\n{"summary": "test", "key_claims": ["claim 1"], "recommendations": [], "named_entities": [], "data_points": [], "comparisons": [], "criticisms": [], "source_reliability": "Medium", "reliability_rationale": "ok"}\n```',
+            ):
                 self.content = content
+
         def invoke(self, _prompt):
             return self._Response()
 
@@ -214,8 +229,12 @@ def test_extract_and_evaluate_handles_plain_markdown_fences(monkeypatch):
 
     class PlainFenceLLM:
         class _Response:
-            def __init__(self, content='```\n{"summary": "plain", "key_claims": ["claim 1"], "recommendations": [], "named_entities": [], "data_points": [], "comparisons": [], "criticisms": [], "source_reliability": "Medium", "reliability_rationale": "ok"}\n```'):
+            def __init__(
+                self,
+                content='```\n{"summary": "plain", "key_claims": ["claim 1"], "recommendations": [], "named_entities": [], "data_points": [], "comparisons": [], "criticisms": [], "source_reliability": "Medium", "reliability_rationale": "ok"}\n```',
+            ):
                 self.content = content
+
         def invoke(self, _prompt):
             return self._Response()
 
@@ -236,17 +255,19 @@ def test_extract_and_evaluate_model_name_skips_load_config(monkeypatch):
 
     monkeypatch.setattr(
         "ora.tools.extract.get_llm",
-        lambda *a, **kw: FakeLLM({
-            "summary": "Test.",
-            "key_claims": [],
-            "recommendations": [],
-            "named_entities": [],
-            "data_points": [],
-            "comparisons": [],
-            "criticisms": [],
-            "source_reliability": "Medium",
-            "reliability_rationale": "ok",
-        }),
+        lambda *a, **kw: FakeLLM(
+            {
+                "summary": "Test.",
+                "key_claims": [],
+                "recommendations": [],
+                "named_entities": [],
+                "data_points": [],
+                "comparisons": [],
+                "criticisms": [],
+                "source_reliability": "Medium",
+                "reliability_rationale": "ok",
+            }
+        ),
     )
 
     # load_config should NOT be called when model_name is provided.
@@ -255,7 +276,7 @@ def test_extract_and_evaluate_model_name_skips_load_config(monkeypatch):
 
     monkeypatch.setattr("ora.tools.extract.load_config", fail_if_called)
 
-    source, extraction = extract_and_evaluate(
+    source, _ = extract_and_evaluate(
         url="https://example.com",
         title="Test",
         content="Content.",

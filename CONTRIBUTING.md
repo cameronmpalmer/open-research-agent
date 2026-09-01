@@ -36,13 +36,23 @@ If you are new to contributing to open source, here is the standard workflow. OR
 
 ## Development setup
 
-Use Python 3.10.
+Use Python 3.10. The repository ships a `Makefile` that manages a local virtual environment:
+
+```bash
+make setup
+```
+
+This creates `.venv` (if needed) and installs the package with dev dependencies. Equivalent manual steps:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
+
+If dependencies change and `make` does not pick them up (or you want a clean slate), reset the environment with `make clean-venv` and re-run `make setup`.
+
+Install the git pre-commit hook once per clone with `make install-hooks`. It runs `make precommit` (lint, tests, and build) before every commit; bypass with `git commit --no-verify`.
 
 ## Configuration for local runs
 
@@ -62,13 +72,19 @@ open-research-agent config --init
 ## Run tests
 
 ```bash
-pytest
+make test
 ```
 
 For CLI-focused changes:
 
 ```bash
-python3 -m pytest tests/test_cli.py -q
+make test T=tests/test_cli.py
+```
+
+Run lint before opening a pull request:
+
+```bash
+make lint
 ```
 
 ## Run the CLI locally
@@ -99,6 +115,6 @@ Do not commit API keys, `.env` files, credentials, or generated files containing
 Before opening a pull request:
 
 1. Run the relevant focused tests.
-2. Run the full test suite with `pytest`.
+2. Run the full test suite with `make test`.
 3. Check `git status --short` for generated reports or other accidental files.
 4. Update documentation when behavior changes.

@@ -3,11 +3,11 @@
 Agents call these helpers through LangGraph RunnableConfig. The CLI decides
 whether and how to render events.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any, Literal, TypedDict
-
 
 ProgressKind = Literal["info", "search", "scrape", "success", "error", "warning", "write"]
 

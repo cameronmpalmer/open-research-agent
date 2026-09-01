@@ -1,5 +1,7 @@
 """Core state types for the ORA research graph."""
-from typing import TypedDict, Literal, Optional, Annotated, Any
+
+from typing import Annotated, Literal, Optional, TypedDict
+
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
@@ -17,12 +19,12 @@ def _list_reducer(left: list | None, right: list | None) -> list:
 
 class Source(BaseModel):
     """An evaluated research source."""
+
     url: str
     title: str
-    publication_date: Optional[str] = None
+    publication_date: str | None = None
     source_type: Literal[
-        "academic_paper", "official_doc", "news", "blog",
-        "forum", "social_media", "unknown"
+        "academic_paper", "official_doc", "news", "blog", "forum", "social_media", "unknown"
     ] = "unknown"
     # CRAAP dimensions (1-5)
     currency: int = Field(default=3, ge=1, le=5)
@@ -36,6 +38,7 @@ class Source(BaseModel):
 
 class Finding(BaseModel):
     """A research finding with citation and confidence."""
+
     claim: str
     confidence: Literal["High", "Moderate", "Low", "Unknown"] = "Moderate"
     supporting_sources: list[str] = Field(default_factory=list)  # URLs
@@ -46,6 +49,7 @@ class Finding(BaseModel):
 
 class ReviewVerdict(BaseModel):
     """Output from the adversarial reviewer."""
+
     verdict: Literal["PASS", "REVISE"] = "PASS"
     blocking: list[str] = Field(default_factory=list)
     required: list[str] = Field(default_factory=list)
@@ -56,6 +60,7 @@ class ReviewVerdict(BaseModel):
 
 class SourceExtraction(BaseModel):
     """LLM-extracted content and evaluation from a single source page."""
+
     summary: str = ""  # 2-4 sentence summary of what this source says
     key_claims: list[str] = Field(default_factory=list)  # Specific factual claims
     recommendations: list[str] = Field(default_factory=list)  # Actionable recommendations
@@ -69,6 +74,7 @@ class SourceExtraction(BaseModel):
 
 class ResearchState(TypedDict, total=False):
     """Shared state for the ORA LangGraph pipeline."""
+
     # Input
     query: str
     intensity: Literal[1, 2, 3, 4, 5]

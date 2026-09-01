@@ -1,10 +1,13 @@
 """Source evaluation using CRAAP dimensions."""
+
 from ora.state import Source
 
 
 def compute_craap_score(dimensions: dict) -> int:
     """Sum CRAAP dimensions (each 1-5) into a 5-25 score."""
-    return sum(dimensions.get(d, 3) for d in ["currency", "relevance", "authority", "accuracy", "purpose"])
+    return sum(
+        dimensions.get(d, 3) for d in ["currency", "relevance", "authority", "accuracy", "purpose"]
+    )
 
 
 def rate_reliability(craap_score: int) -> str:

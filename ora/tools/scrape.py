@@ -1,6 +1,8 @@
 """Firecrawl scrape tool for LangChain."""
+
 import requests
 from langchain_core.tools import tool
+
 from ora.config import get_firecrawl_client
 
 
@@ -33,5 +35,5 @@ def scrape_page(url: str) -> str:
         if len(content) > 8000:
             content = content[:8000] + "\n\n[Content truncated at 8000 characters]"
         return content
-    except Exception as e:
-        return f"Scrape error for {url}: {str(e)}"
+    except Exception as e:  # noqa: BLE001
+        return f"Scrape error for {url}: {e!s}"

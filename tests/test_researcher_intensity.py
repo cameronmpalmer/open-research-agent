@@ -1,11 +1,12 @@
 """Tests for intensity level 4-5 behavior."""
+
 from ora.agents.researcher import (
-    generate_search_queries,
+    LEVEL_PARAMS,
+    _format_reviewer_feedback,
     generate_gap_queries,
     generate_gap_queries_dynamic,
-    _format_reviewer_feedback,
+    generate_search_queries,
     researcher_node,
-    LEVEL_PARAMS,
 )
 from ora.state import ReviewVerdict
 
@@ -155,6 +156,7 @@ class TestQueryDeduplication:
         """When executed_queries is in state, round-1 queries in those
         should be skipped and counted as duplicates."""
         from ora.state import Source
+
         events = []
 
         class FakeTool:
@@ -205,6 +207,7 @@ class TestQueryDeduplication:
         """The node output must include executed_queries so they
         accumulate across invocations via the _list_reducer."""
         from ora.state import Source
+
         events = []
 
         class FakeTool:
@@ -247,14 +250,15 @@ class TestIntensityGatedExtraction:
     def test_intensity_1_uses_heuristic_evaluation(self, monkeypatch):
         """At intensity 1, _scrape_and_collect should call the heuristic
         evaluate_source, not the LLM extract_and_evaluate."""
-        from ora.state import Source
         from ora.agents.researcher import _scrape_and_collect
+        from ora.state import Source
 
         call_log = []
 
         class FakeTool:
             def __init__(self, value):
                 self.value = value
+
             def invoke(self, _args):
                 return self.value
 
@@ -289,14 +293,15 @@ class TestIntensityGatedExtraction:
     def test_intensity_4_uses_llm_extraction(self, monkeypatch):
         """At intensity 4, _scrape_and_collect should call the LLM
         extract_and_evaluate, not the heuristic."""
-        from ora.state import Source, SourceExtraction
         from ora.agents.researcher import _scrape_and_collect
+        from ora.state import Source, SourceExtraction
 
         call_log = []
 
         class FakeTool:
             def __init__(self, value):
                 self.value = value
+
             def invoke(self, _args):
                 return self.value
 
@@ -334,8 +339,8 @@ class TestIntensityGatedExtraction:
     def test_intensity_3_uses_llm_extraction(self, monkeypatch):
         """At intensity 3 (the threshold), _scrape_and_collect should use
         LLM extraction, not heuristic."""
-        from ora.state import Source, SourceExtraction
         from ora.agents.researcher import _scrape_and_collect
+        from ora.state import Source, SourceExtraction
 
         call_log = []
 

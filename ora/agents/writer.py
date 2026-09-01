@@ -1,11 +1,14 @@
 """Writer agent node for LangGraph."""
+
 from datetime import date
-from typing import Any, Optional
+from typing import Any
+
 from langchain_core.runnables import RunnableConfig
-from ora.state import ResearchState
-from ora.prompts import WRITER_PROMPT
-from ora.config import load_config, get_researcher_model, get_llm
+
+from ora.config import get_llm, get_researcher_model, load_config
 from ora.progress import emit_progress
+from ora.prompts import WRITER_PROMPT
+from ora.state import ResearchState
 
 
 def _format_findings_for_prompt(findings: list) -> str:
@@ -20,11 +23,11 @@ def _format_findings_for_prompt(findings: list) -> str:
     lines = []
     for i, f in enumerate(findings, 1):
         # Handle both Pydantic model and dict (LangGraph serialization)
-        if hasattr(f, 'claim'):
+        if hasattr(f, "claim"):
             claim = f.claim
             confidence = f.confidence
             sources = ", ".join(f.supporting_sources[:3]) if f.supporting_sources else "no sources"
-            extraction = getattr(f, 'extraction', None)
+            extraction = getattr(f, "extraction", None)
         elif isinstance(f, dict):
             claim = f.get("claim", "")
             confidence = f.get("confidence", "Moderate")
@@ -46,11 +49,11 @@ def _format_findings_for_prompt(findings: list) -> str:
                 ents = extraction.get("named_entities", [])
                 comps = extraction.get("comparisons", [])
             else:
-                kc = getattr(extraction, 'key_claims', [])
-                recs = getattr(extraction, 'recommendations', [])
-                dps = getattr(extraction, 'data_points', [])
-                ents = getattr(extraction, 'named_entities', [])
-                comps = getattr(extraction, 'comparisons', [])
+                kc = getattr(extraction, "key_claims", [])
+                recs = getattr(extraction, "recommendations", [])
+                dps = getattr(extraction, "data_points", [])
+                ents = getattr(extraction, "named_entities", [])
+                comps = getattr(extraction, "comparisons", [])
 
             if kc:
                 lines.append("   Key claims:")
@@ -90,10 +93,10 @@ def _build_source_table(sources: list) -> str:
         return ""
     rows = []
     for i, s in enumerate(sources, 1):
-        title = getattr(s, 'title', '') or ''
-        url = getattr(s, 'url', '') or ''
-        source_type = getattr(s, 'source_type', 'unknown') or 'unknown'
-        reliability = getattr(s, 'overall_reliability', 'Unknown') or 'Unknown'
+        title = getattr(s, "title", "") or ""
+        url = getattr(s, "url", "") or ""
+        source_type = getattr(s, "source_type", "unknown") or "unknown"
+        reliability = getattr(s, "overall_reliability", "Unknown") or "Unknown"
         rows.append(f"| {i} | {title} | {url} | {source_type} | {reliability} |")
     header = "| # | Title | URL | Type | Reliability |\n|---|-------|-----|------|-------------|\n"
     return "## Source Table\n" + header + "\n".join(rows) + "\n"
@@ -105,9 +108,9 @@ def _build_bibliography(sources: list) -> str:
         return ""
     lines = ["## Bibliography"]
     for i, s in enumerate(sources, 1):
-        title = getattr(s, 'title', '') or 'Untitled'
-        url = getattr(s, 'url', '') or ''
-        date_str = getattr(s, 'publication_date', '') or ''
+        title = getattr(s, "title", "") or "Untitled"
+        url = getattr(s, "url", "") or ""
+        date_str = getattr(s, "publication_date", "") or ""
 
         line = f"{i}. {title}"
         if date_str:
@@ -117,9 +120,7 @@ def _build_bibliography(sources: list) -> str:
     return "\n".join(lines) + "\n"
 
 
-def writer_node(
-    state: ResearchState, config: Optional[RunnableConfig] = None
-) -> dict[str, Any]:
+def writer_node(state: ResearchState, config: RunnableConfig | None = None) -> dict[str, Any]:
     """Writer LangGraph node. Synthesizes findings into a structured report.
 
     The header (source count), source table, and bibliography are generated
@@ -156,7 +157,7 @@ def writer_node(
     except Exception as e:
         emit_progress(config, f"Writer: LLM call failed: {e}", kind="error")
         raise
-    llm_body = response.content if hasattr(response, 'content') else str(response)
+    llm_body = response.content if hasattr(response, "content") else str(response)
 
     # Assemble the final report: header + LLM body + programmatic sections
     header = _build_header(query, intensity, len(sources_raw))

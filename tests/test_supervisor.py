@@ -1,5 +1,5 @@
 """Tests for supervisor agent."""
-import pytest
+
 from ora.agents.supervisor import _extract_search_queries, _search_queries_fence_found
 from ora.state import ResearchState
 
@@ -105,14 +105,14 @@ def test_plan_node_sets_search_queries(monkeypatch):
     """plan_node should extract search_queries from supervisor response."""
     from ora.agents.supervisor import plan_node
 
-    plan_text = '''# Research Plan
+    plan_text = """# Research Plan
 
 ## Subtopics
 - Topic 1
 
 ```search_queries
 ["keyword query one", "keyword query two"]
-```'''
+```"""
 
     monkeypatch.setattr(
         "ora.agents.supervisor._invoke_supervisor",

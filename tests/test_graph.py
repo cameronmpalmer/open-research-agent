@@ -1,4 +1,5 @@
 """Tests for graph assembly and routing."""
+
 from ora.graph import build_graph, build_research_graph
 from ora.state import ResearchState, ReviewVerdict
 
@@ -26,7 +27,7 @@ class TestGraphAssembly:
         assert "reviewer" in graph.nodes
 
     def test_graph_accepts_initial_state(self):
-        graph = build_graph()
+        build_graph()
         initial_state: ResearchState = {
             "query": "test",
             "intensity": 2,
@@ -39,16 +40,19 @@ class TestGraphAssembly:
 class TestRouting:
     def test_route_after_plan_not_approved(self):
         from ora.agents.supervisor import route_after_plan
+
         state: ResearchState = {"plan_approved": False}
         assert route_after_plan(state) == "__end__"
 
     def test_route_after_plan_approved(self):
         from ora.agents.supervisor import route_after_plan
+
         state: ResearchState = {"plan_approved": True}
         assert route_after_plan(state) == "researcher"
 
     def test_route_after_reviewer_pass(self):
         from ora.agents.supervisor import route_after_reviewer
+
         state: ResearchState = {
             "review_verdict": ReviewVerdict(verdict="PASS"),
             "revision_count": 0,
@@ -57,6 +61,7 @@ class TestRouting:
 
     def test_route_after_reviewer_revise_under_limit(self):
         from ora.agents.supervisor import route_after_reviewer
+
         state: ResearchState = {
             "review_verdict": ReviewVerdict(verdict="REVISE"),
             "revision_count": 1,
@@ -65,6 +70,7 @@ class TestRouting:
 
     def test_route_after_reviewer_revise_at_limit(self):
         from ora.agents.supervisor import route_after_reviewer
+
         state: ResearchState = {
             "review_verdict": ReviewVerdict(verdict="REVISE"),
             "revision_count": 3,
