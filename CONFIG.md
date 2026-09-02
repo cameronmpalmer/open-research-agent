@@ -83,7 +83,10 @@ Model names may carry a `provider:model` prefix (see
 | `models.reviewer` | (falls back to `models.default`) | Reviewer (intensity 3+); overridable with `--reviewer-model` |
 
 CLI overrides: `--model` sets the researcher + writer model for one run;
-`--reviewer-model` sets the reviewer model for one run.
+`--reviewer-model` sets the reviewer model for one run. Overrides are
+run-scoped and applied at the config layer, so they cover every internal
+call (including gap-query generation and per-source extraction); no call
+site bypasses the configured model.
 
 ### search
 
