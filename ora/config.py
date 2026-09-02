@@ -224,10 +224,27 @@ def get_llm(model_name: str, temperature: float = 0.0):
         env_hint = provider.api_key_env or "the provider's api_key_env var"
         raise ValueError(f"No API key for provider '{provider_name}'. Set {env_hint}.")
 
-    return ChatOpenAI(
+    llm = ChatOpenAI(
         model=clean_name,
         temperature=temperature,
         base_url=provider.base_url,
         api_key=api_key,
         default_headers=provider.headers or None,
     )
+
+    # When a usage collector is active (ora.usage.usage_collection), record
+    # tokens/cost from each response without changing agent call sites.
+    from ora.usage import active_collector
+
+    collector = active_collector()
+    if collector is not None:
+        original_invoke = llm.invoke
+
+        def invoke_with_usage(*args, **kwargs):
+            response = original_invoke(*args, **kwargs)
+            collector.record(response)
+            return response
+
+        llm.invoke = invoke_with_usage
+
+    return llm

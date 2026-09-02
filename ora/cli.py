@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import time
 import warnings
 from datetime import datetime
 
@@ -17,6 +18,7 @@ from ora.config import (
     get_supervisor_model,
     load_config,
 )
+from ora.usage import UsageCollector, usage_collection
 
 logging.captureWarnings(True)
 warnings.filterwarnings("ignore", message=".*allowed_objects.*", module="langgraph")
@@ -118,6 +120,12 @@ def main():
     """
 
 
+def _run_collected(collector: UsageCollector, func, *args, **kwargs):
+    """Run ``func(*args, **kwargs)`` with the usage collector active."""
+    with usage_collection(collector):
+        return func(*args, **kwargs)
+
+
 @main.command()
 @click.argument("query")
 @click.option(
@@ -184,6 +192,8 @@ def research(
     from ora.graph import build_plan_graph, build_research_graph
 
     # Phase 1: Generate and review research plan
+    start_time = time.monotonic()
+    collector = UsageCollector()
     plan_graph = build_plan_graph()
     initial_state = {
         "query": query,
@@ -193,7 +203,8 @@ def research(
     }
 
     plan_result = _spin(
-        lambda: plan_graph.invoke(initial_state), message="Generating research plan..."
+        lambda: _run_collected(collector, plan_graph.invoke, initial_state),
+        message="Generating research plan...",
     )
     plan = plan_result.get("research_plan", "No plan generated.")
 
@@ -244,8 +255,8 @@ def research(
             elif choice == "R":
                 feedback = click.prompt("  Feedback for supervisor")
                 plan, queries = _spin(
-                    lambda plan=plan, feedback=feedback: revise_plan_text(
-                        query, intensity, plan, feedback
+                    lambda plan=plan, feedback=feedback: _run_collected(
+                        collector, revise_plan_text, query, intensity, plan, feedback
                     ),
                     message="Revising plan...",
                 )
@@ -269,9 +280,14 @@ def research(
     if reviewer_model:
         research_input["reviewer_model"] = reviewer_model
     if quiet:
-        final_state = _spin(lambda: research_graph.invoke(research_input), message="Researching...")
+        final_state = _spin(
+            lambda: _run_collected(collector, research_graph.invoke, research_input),
+            message="Researching...",
+        )
     else:
-        final_state = research_graph.invoke(
+        final_state = _run_collected(
+            collector,
+            research_graph.invoke,
             research_input,
             {"configurable": {"progress_callback": _print_progress_event}},
         )
@@ -288,6 +304,10 @@ def research(
     click.echo(
         f"  Sources: {sources_count} | Findings: {findings_count} | Draft: {draft_len} chars"
     )
+
+    elapsed = time.monotonic() - start_time
+    for line in collector.summary_lines(elapsed):
+        click.echo(line)
 
     if not final_state.get("draft_report"):
         click.echo(
