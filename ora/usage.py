@@ -121,3 +121,24 @@ class usage_collection:
 def active_collector() -> UsageCollector | None:
     """The collector bound to the current context, if any."""
     return _current_collector.get()
+
+
+class RecordingLLM:
+    """Delegating wrapper that records usage from each ``invoke`` response.
+
+    ChatOpenAI is a pydantic model and rejects instance-attribute patching,
+    so get_llm returns this proxy instead when a collector is active. All
+    other attributes delegate to the wrapped model.
+    """
+
+    def __init__(self, llm: Any, collector: UsageCollector):
+        self._llm = llm
+        self._collector = collector
+
+    def invoke(self, *args, **kwargs):
+        response = self._llm.invoke(*args, **kwargs)
+        self._collector.record(response)
+        return response
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._llm, name)

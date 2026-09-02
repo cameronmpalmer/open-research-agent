@@ -170,6 +170,34 @@ class TestGetLlmRecordsUsage:
         assert collector.output_tokens == 3
         assert collector.cost == pytest.approx(1e-05)
 
+    def test_recording_proxy_delegates_attributes(self, monkeypatch):
+        from ora import config as config_module
+        from ora.config import get_llm
+        from ora.usage import RecordingLLM
+
+        class FakeChatOpenAI:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def invoke(self, *args, **kwargs):
+                return _message(
+                    usage_metadata={"input_tokens": 7, "output_tokens": 3},
+                    token_usage={"cost": 1e-05},
+                )
+
+        monkeypatch.setattr("langchain_openai.ChatOpenAI", FakeChatOpenAI)
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        monkeypatch.setattr("ora.config.load_config", lambda *a, **kw: config_module.ORASettings())
+
+        with usage_collection() as collector:
+            llm = get_llm("deepseek-v4-flash")
+            # Recording proxy is returned; unknown attributes delegate.
+            assert isinstance(llm, RecordingLLM)
+            assert llm.kwargs["model"] == "deepseek-v4-flash"
+            llm.invoke("hello")
+
+        assert collector.calls == 1
+
     def test_invoke_passthrough_without_collector(self, monkeypatch):
         from ora import config as config_module
         from ora.config import get_llm

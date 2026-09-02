@@ -232,19 +232,12 @@ def get_llm(model_name: str, temperature: float = 0.0):
         default_headers=provider.headers or None,
     )
 
-    # When a usage collector is active (ora.usage.usage_collection), record
-    # tokens/cost from each response without changing agent call sites.
-    from ora.usage import active_collector
+    # When a usage collector is active (ora.usage.usage_collection), return a
+    # recording proxy so tokens/cost are captured without changing agent
+    # call sites. ChatOpenAI is a pydantic model, so we cannot patch it.
+    from ora.usage import RecordingLLM, active_collector
 
     collector = active_collector()
     if collector is not None:
-        original_invoke = llm.invoke
-
-        def invoke_with_usage(*args, **kwargs):
-            response = original_invoke(*args, **kwargs)
-            collector.record(response)
-            return response
-
-        llm.invoke = invoke_with_usage
-
+        return RecordingLLM(llm, collector)
     return llm
