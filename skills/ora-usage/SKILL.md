@@ -7,13 +7,14 @@ description: Use when running ORA (Open Research Agent) CLI commands, configurin
 
 ## Overview
 
-ORA is a multi-agent research CLI (v0.1.0) that turns a query into a sourced markdown report. Pipeline: Supervisor plans → Researcher searches and scrapes → Writer synthesizes → Reviewer audits (intensity 3+). Backends: DeepSeek API (LLM), Firecrawl (search/scrape).
+ORA is a multi-agent research CLI (v0.1.0) that turns a query into a sourced markdown report. Pipeline: Supervisor plans → Researcher searches and scrapes → Writer synthesizes → Reviewer audits (intensity 3+). Backends: DeepSeek API and OpenRouter (LLM), Firecrawl (search/scrape).
 
 ## Required Setup
 
 ```bash
 export DEEPSEEK_API_KEY="your-key"    # or OPENAI_API_KEY
 export FIRECRAWL_API_KEY="your-key"   # omit for self-hosted Firecrawl
+export OPENROUTER_API_KEY="your-key"    # only if using OpenRouter models
 ora config --init                     # creates ~/.ora/config.yaml
 ```
 
@@ -30,21 +31,25 @@ For self-hosted Firecrawl: set `FIRECRAWL_API_URL=http://localhost:3002`.
 | Stdout only, no file | `ora research "query" --no-save` |
 | Skip interactive approval | `ora research "query" -y` (`--auto-approve`) |
 | Minimal output | `ora research "query" --quiet` |
-| Change researcher model | `ora research "query" --model deepseek-v4-chat` |
+| Change researcher model | `ora research "query" --model openrouter:anthropic/claude-3.5-sonnet` |
 | Change reviewer model | `ora research "query" --reviewer-model deepseek-v4-pro` |
 | Limit reviewer rounds | `ora research "query" --max-revisions 2` |
 | Show config | `ora config --show` |
 
 ## Configuration
 
-Config file: `~/.ora/config.yaml`. **Priority: env vars > config file > defaults.**
+Config file: `~/.ora/config.yaml`. **Priority: YAML file > env vars > defaults**
+(a key present in the YAML file overrides its env var). API keys are read from
+the process environment only, never from the YAML file. For the full reference
+(providers:, output:, limits:, env-var forms), read `CONFIG.md` in the repo
+root.
 
 ```yaml
 models:
-  default: deepseek-v4-flash       # researcher + writer fallback
-  researcher: ~                     # overrides default
-  supervisor: deepseek-v4-pro       # planning (no CLI flag exists)
-  reviewer: deepseek-v4-pro
+  default: deepseek-v4-flash       # every role falls back to this; optional
+  # researcher: ~                  # per-role overrides for researcher+writer,
+  # supervisor: ~                  # supervisor (planning, no CLI flag),
+  # reviewer: ~                    # and reviewer (--reviewer-model overrides)
 search:
   provider: firecrawl
 limits:
@@ -54,7 +59,12 @@ limits:
 
 Change supervisor model only via config file or `ORA_MODELS__SUPERVISOR` env var.
 
-`provider:model` prefix (e.g., `openai:gpt-4.1`) is cosmetic and stripped; everything routes through `deepseek_base_url`. To use a different provider, change `deepseek_base_url` in config.
+`provider:model` prefixes are functional: `openrouter:anthropic/claude-3.5-sonnet`
+routes to OpenRouter, `deepseek:deepseek-chat` to DeepSeek. No prefix uses the
+default provider (`provider.default` in config, default `deepseek`). Provider
+base URLs and API-key env vars live under `providers:` in `config.yaml`
+(`config --init` writes the block). Unknown prefixes warn and fall back to the
+default provider.
 
 ## Intensity Levels
 
@@ -80,14 +90,13 @@ Reviewer (levels 3+) audits draft and can issue REVISE to restart research (max 
 ## Known Issues (v0.1.0)
 
 - **`--no-review` is dead code.** Declared but not wired. Only dropping to intensity 2 removes the reviewer.
-- **`provider:model` prefix is cosmetic.** Stripped silently; all requests go to DeepSeek.
 
 ## Common Mistakes
 
 | Mistake | Reality |
 |---------|---------|
 | Using `--no-review` at intensity 3+ | Flag is dead. Drop to intensity 2 instead. |
-| Passing `openai:gpt-4.1` as model name | Prefix stripped, still routes to DeepSeek. Change `deepseek_base_url` in config. |
+| Passing `openai:gpt-4.1` as model name | `openai` is not a configured provider, so it warns and falls back to the default provider. Use `openrouter:...` to route via OpenRouter. |
 | Expecting `--supervisor-model` flag | Does not exist. Use config file or `ORA_MODELS__SUPERVISOR`. |
 | Forgetting `FIRECRAWL_API_KEY` | Required for search/scrape. Report generation fails without it. |
 | `--max-revisions` at intensity 1-2 | Only relevant at intensity 3+ (reviewer active). |
@@ -96,6 +105,6 @@ Reviewer (levels 3+) audits draft and can issue REVISE to restart research (max 
 ## Red Flags
 
 - "I'll use --no-review" → Dead code. Drop intensity.
-- "I'll pass openai:gpt-4" → Prefix is cosmetic. Change base URL.
+- "I'll pass openai:gpt-4" → `openai` is an unknown provider; it warns and falls back to the default. Use `openrouter:...` or configure a provider.
 - "I'll set --supervisor-model" → Flag does not exist. Use config.
 - "Report didn't generate" → Check both `DEEPSEEK_API_KEY` and `FIRECRAWL_API_KEY`.

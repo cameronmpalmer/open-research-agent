@@ -3,13 +3,24 @@
 import logging
 import os
 import re
+import time
 import warnings
 from datetime import datetime
 
 import click
 import yaml
 
-from ora.config import get_researcher_model, load_config
+from ora.config import (
+    DEFAULT_PROVIDERS,
+    _resolve_provider,
+    clear_model_overrides,
+    get_researcher_model,
+    get_reviewer_model,
+    get_supervisor_model,
+    load_config,
+    set_model_override,
+)
+from ora.usage import UsageCollector, usage_collection
 
 logging.captureWarnings(True)
 warnings.filterwarnings("ignore", message=".*allowed_objects.*", module="langgraph")
@@ -111,6 +122,12 @@ def main():
     """
 
 
+def _run_collected(collector: UsageCollector, func, *args, **kwargs):
+    """Run ``func(*args, **kwargs)`` with the usage collector active."""
+    with usage_collection(collector):
+        return func(*args, **kwargs)
+
+
 @main.command()
 @click.argument("query")
 @click.option(
@@ -169,19 +186,16 @@ def research(
     click.echo(f"ORA Research: {query}")
     settings = load_config()
     researcher_model_name = model or settings.models.researcher or settings.models.default
-    reviewer_model_name = reviewer_model or settings.models.reviewer or "deepseek-v4-pro"
+    reviewer_model_name = reviewer_model or settings.models.reviewer or settings.models.default
     click.echo(
         f"  Intensity: {intensity} | Researcher: {researcher_model_name} | Reviewer: {reviewer_model_name}"
     )
 
-    if model:
-        settings.models.researcher = model
-    if reviewer_model:
-        settings.models.reviewer = reviewer_model
-
     from ora.graph import build_plan_graph, build_research_graph
 
     # Phase 1: Generate and review research plan
+    start_time = time.monotonic()
+    collector = UsageCollector()
     plan_graph = build_plan_graph()
     initial_state = {
         "query": query,
@@ -191,7 +205,8 @@ def research(
     }
 
     plan_result = _spin(
-        lambda: plan_graph.invoke(initial_state), message="Generating research plan..."
+        lambda: _run_collected(collector, plan_graph.invoke, initial_state),
+        message="Generating research plan...",
     )
     plan = plan_result.get("research_plan", "No plan generated.")
 
@@ -242,8 +257,8 @@ def research(
             elif choice == "R":
                 feedback = click.prompt("  Feedback for supervisor")
                 plan, queries = _spin(
-                    lambda plan=plan, feedback=feedback: revise_plan_text(
-                        query, intensity, plan, feedback
+                    lambda plan=plan, feedback=feedback: _run_collected(
+                        collector, revise_plan_text, query, intensity, plan, feedback
                     ),
                     message="Revising plan...",
                 )
@@ -259,13 +274,27 @@ def research(
     click.echo()
     research_graph = build_research_graph(intensity=intensity, no_review=no_review)
     plan_result["plan_approved"] = True
-    if quiet:
-        final_state = _spin(lambda: research_graph.invoke(plan_result), message="Researching...")
-    else:
-        final_state = research_graph.invoke(
-            plan_result,
-            {"configurable": {"progress_callback": _print_progress_event}},
-        )
+    # CLI model flags become run-scoped config overrides so every agent and
+    # internal helper resolves them through the same config path.
+    if model:
+        set_model_override("researcher", model)
+    if reviewer_model:
+        set_model_override("reviewer", reviewer_model)
+    try:
+        if quiet:
+            final_state = _spin(
+                lambda: _run_collected(collector, research_graph.invoke, plan_result),
+                message="Researching...",
+            )
+        else:
+            final_state = _run_collected(
+                collector,
+                research_graph.invoke,
+                plan_result,
+                {"configurable": {"progress_callback": _print_progress_event}},
+            )
+    finally:
+        clear_model_overrides()
 
     if intensity < 3:
         if no_review:
@@ -279,6 +308,10 @@ def research(
     click.echo(
         f"  Sources: {sources_count} | Findings: {findings_count} | Draft: {draft_len} chars"
     )
+
+    elapsed = time.monotonic() - start_time
+    for line in collector.summary_lines(elapsed):
+        click.echo(line)
 
     if not final_state.get("draft_report"):
         click.echo(
@@ -350,15 +383,27 @@ def config(show, init):
         default_config = {
             "models": {
                 "default": "deepseek-v4-flash",
-                "researcher": "deepseek-v4-flash",
-                "supervisor": "deepseek-v4-pro",
-                "reviewer": "deepseek-v4-pro",
             },
             "search": {
                 "provider": "firecrawl",
                 "firecrawl_api_url": "https://api.firecrawl.com",
             },
             "limits": {"max_revisions": 3, "default_intensity": 2},
+            "provider": {"default": "deepseek"},
+            "providers": {
+                "deepseek": {
+                    "base_url": "https://api.deepseek.com",
+                    "api_key_env": "DEEPSEEK_API_KEY",
+                },
+                "openrouter": {
+                    "base_url": "https://openrouter.ai/api/v1",
+                    "api_key_env": "OPENROUTER_API_KEY",
+                    "headers": {
+                        "HTTP-Referer": "https://github.com/cameronmpalmer/open-research-agent",
+                        "X-Title": "ORA",
+                    },
+                },
+            },
         }
         with open(config_path, "w") as f:
             yaml.dump(default_config, f, default_flow_style=False)
@@ -368,17 +413,24 @@ def config(show, init):
     settings = load_config()
     click.echo(f"Config file: {config_path}")
     click.echo()
-    click.echo(
-        f"Supervisor (planning & routing): {settings.models.supervisor or 'deepseek-v4-pro'}"
-    )
+    click.echo(f"Supervisor (planning & routing): {get_supervisor_model(settings)}")
     click.echo(f"Researcher (web search & source eval): {get_researcher_model(settings)}")
-    click.echo(
-        f"Writer (report synthesis): {settings.models.researcher or settings.models.default}"
-    )
-    click.echo(f"Reviewer (adversarial audit): {settings.models.reviewer or 'deepseek-v4-pro'}")
+    click.echo(f"Writer (report synthesis): {get_researcher_model(settings)}")
+    click.echo(f"Reviewer (adversarial audit): {get_reviewer_model(settings)}")
     click.echo()
     click.echo(f"Search backend: {settings.search.provider}")
     click.echo(f"Firecrawl URL: {settings.search.firecrawl_api_url}")
+    click.echo(f"Default provider: {settings.provider.default or 'deepseek'}")
+    for name in sorted(set(DEFAULT_PROVIDERS) | set(settings.providers)):
+        resolved = _resolve_provider(settings, name)
+        if resolved is None:
+            continue
+        key_env = resolved.api_key_env or ""
+        key_set = "yes" if os.environ.get(key_env) else "no"
+        click.echo(
+            f"  {name}: {resolved.base_url} (key env: {key_env or 'n/a'}, key set: {key_set})"
+        )
+    click.echo()
     click.echo(f"Max revisions: {settings.limits.max_revisions}")
     click.echo()
 

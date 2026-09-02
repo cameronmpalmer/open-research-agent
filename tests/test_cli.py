@@ -22,6 +22,9 @@ def _fake_settings():
         search=SimpleNamespace(provider="firecrawl", firecrawl_api_url="https://api.firecrawl.com"),
         output=SimpleNamespace(default_format="markdown", always_include_sources=True),
         limits=SimpleNamespace(max_revisions=3),
+        provider=SimpleNamespace(default="deepseek"),
+        providers={},
+        deepseek_base_url="https://api.deepseek.com",
     )
 
 
@@ -151,6 +154,18 @@ class TestCLI:
         assert result.exit_code == 0
         assert "Config created" in result.output
         assert (tmp_path / ".ora" / "config.yaml").exists()
+        content = (tmp_path / ".ora" / "config.yaml").read_text()
+        assert "openrouter" in content
+        assert "api_key_env" in content
+
+    def test_config_show_lists_providers(self, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(main, ["config", "--show"], env={"HOME": str(tmp_path)})
+        assert result.exit_code == 0
+        assert "Default provider: deepseek" in result.output
+        assert "deepseek" in result.output
+        assert "openrouter" in result.output
+        assert "key set:" in result.output
 
     def test_research_without_query_fails(self):
         runner = CliRunner()
@@ -507,3 +522,57 @@ class TestCLI:
         # The plan must never be rendered under --hide-plan-on-autoapprove.
         # (The final report may be rendered to stdout when --no-save is used.)
         assert all("# Plan" not in text for text in plan_rendered)
+
+    def test_model_flags_install_config_overrides(self, monkeypatch):
+        """--model and --reviewer-model must install run-scoped config overrides."""
+        from ora import cli as cli_module
+
+        received_states = []
+        override_calls = []
+        clear_calls = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                received_states.append(state)
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        def record_set(role, model_name):
+            override_calls.append((role, model_name))
+
+        def record_clear():
+            clear_calls.append(True)
+
+        monkeypatch.setattr(cli_module, "set_model_override", record_set)
+        monkeypatch.setattr(cli_module, "clear_model_overrides", record_clear)
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "A")
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "research",
+                "Rust vs Go",
+                "--no-save",
+                "--model",
+                "openrouter:qwen/qwen3.7-flash",
+                "--reviewer-model",
+                "openrouter:deepseek/deepseek-v4-pro",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert ("researcher", "openrouter:qwen/qwen3.7-flash") in override_calls
+        assert ("reviewer", "openrouter:deepseek/deepseek-v4-pro") in override_calls
+        assert clear_calls  # overrides cleared after the run
+        # Model overrides travel via config, not via graph state.
+        assert "researcher_model" not in received_states[0]
+        assert "reviewer_model" not in received_states[0]

@@ -4,7 +4,7 @@ import json
 
 from langchain_core.runnables import RunnableConfig
 
-from ora.config import get_llm, load_config
+from ora.config import get_llm, get_researcher_model, load_config
 from ora.prompts import EXTRACTOR_PROMPT
 from ora.state import Source, SourceExtraction
 from ora.tools.evaluate import evaluate_source as evaluate_heuristic
@@ -46,7 +46,7 @@ def extract_and_evaluate(
 
     if not model_name:
         settings = load_config()
-        model_name = settings.models.researcher or settings.models.default
+        model_name = get_researcher_model(settings)
 
     prompt_text = EXTRACTOR_PROMPT.format(
         query=query,

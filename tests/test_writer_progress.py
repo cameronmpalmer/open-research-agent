@@ -172,3 +172,23 @@ def test_format_findings_includes_pydantic_extraction_data():
     assert "$88" in formatted
     assert "Brilliant Cut Grinder" in formatted
     assert "BCG vs Santa Cruz Shredder" in formatted
+
+
+def test_writer_uses_researcher_run_override(monkeypatch):
+    """A config-layer researcher override (CLI --model) must reach the writer."""
+    from ora.config import clear_model_overrides, set_model_override
+
+    captured = {}
+
+    def fake_get_llm(model_name, temperature=0.3):
+        captured["model_name"] = model_name
+        return FakeLLM()
+
+    monkeypatch.setattr(writer_module, "get_llm", fake_get_llm)
+    set_model_override("researcher", "openrouter:qwen/qwen3.7-flash")
+    try:
+        writer_node({"query": "Rust vs Go", "intensity": 1, "findings": []})
+    finally:
+        clear_model_overrides()
+
+    assert captured["model_name"] == "openrouter:qwen/qwen3.7-flash"

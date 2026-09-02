@@ -1,0 +1,209 @@
+# ORA Configuration Reference
+
+ORA reads its settings from `~/.ora/config.yaml`. Generate a starter file with
+`open-research-agent config --init`, view the effective configuration with
+`open-research-agent config --show`, and see every CLI flag with
+`open-research-agent --help`.
+
+This document is the complete reference for the YAML format, the environment
+variables ORA understands, and how they interact.
+
+## Precedence
+
+Settings are resolved in this order:
+
+1. **YAML file** (`~/.ora/config.yaml`, or `ORA_`-prefixed env vars applied by
+   the settings layer first, then YAML on top)
+2. **Environment variables** (fields not present in the YAML file)
+3. **Defaults** (hardcoded in `ora/config.py`)
+
+In practice this means: **the YAML file wins over environment variables for
+any key it defines**. An env var is only honored when the YAML file does not
+set that key. (The one exception is API keys, which are read directly from the
+process environment; see [API keys](#api-keys).)
+
+## Full example
+
+This is everything `config --init` writes, plus the optional `output:` block
+and legacy key, annotated:
+
+```yaml
+# ~/.ora/config.yaml
+
+models:
+  default: deepseek-v4-flash       # every role falls back to this
+  # Optional per-role overrides; any unset role uses models.default:
+  # researcher: <model>            # researcher agent, extractor, and writer
+  # supervisor: <model>            # planning; no CLI flag exists for this
+  # reviewer: <model>              # adversarial review (intensity 3+)
+
+search:
+  provider: firecrawl
+  firecrawl_api_url: https://api.firecrawl.com   # set to http://localhost:3002 for self-hosted
+
+output:                              # parsed but not yet consumed by the CLI
+  default_format: markdown
+  always_include_sources: true
+
+limits:                              # written by config --init and shown by
+  max_revisions: 3                   # config --show; the CLI currently uses
+  default_intensity: 2               # its own flag defaults for these
+
+provider:
+  default: deepseek                  # used when a model name has no prefix
+
+providers:
+  deepseek:
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    headers:                         # optional; sent on every request
+      HTTP-Referer: https://github.com/cameronmpalmer/open-research-agent
+      X-Title: ORA
+
+# deepseek_base_url: https://api.deepseek.com   # legacy key, see below
+```
+
+## Sections
+
+### models
+
+Which model each agent role uses. **`models.default` applies to every role**:
+an unset `researcher`, `supervisor`, or `reviewer` falls back to `default`.
+Model names may carry a `provider:model` prefix (see
+[Provider routing](#provider-routing)).
+
+| Key | Default | Used by |
+|---|---|---|
+| `models.default` | `deepseek-v4-flash` | Every role that has no explicit override |
+| `models.researcher` | (falls back to `models.default`) | Researcher agent, per-source extractor, and writer |
+| `models.supervisor` | (falls back to `models.default`) | Supervisor (planning and routing); config only, no CLI flag |
+| `models.reviewer` | (falls back to `models.default`) | Reviewer (intensity 3+); overridable with `--reviewer-model` |
+
+CLI overrides: `--model` sets the researcher + writer model for one run;
+`--reviewer-model` sets the reviewer model for one run. Overrides are
+run-scoped and applied at the config layer, so they cover every internal
+call (including gap-query generation and per-source extraction); no call
+site bypasses the configured model.
+
+### search
+
+| Key | Default | Purpose |
+|---|---|---|
+| `search.provider` | `firecrawl` | Search and scrape backend |
+| `search.firecrawl_api_key` | (unset) | Firecrawl key; normally exported as `FIRECRAWL_API_KEY` instead |
+| `search.firecrawl_api_url` | `https://api.firecrawl.com` | Firecrawl endpoint; set to `http://localhost:3002` for self-hosted Firecrawl (key optional there) |
+
+### output
+
+Parsed and shown by `config --init`/`--show`, but **not yet consumed by the
+CLI**. Reserved for future report-format controls.
+
+| Key | Default |
+|---|---|
+| `output.default_format` | `markdown` |
+| `output.always_include_sources` | `true` |
+
+### limits
+
+Written by `config --init` and displayed by `config --show`, but the CLI
+currently uses its own flag defaults (`--intensity` defaults to 2,
+`--max-revisions` to 3). The YAML values are not yet wired into command
+defaults.
+
+| Key | Default |
+|---|---|
+| `limits.max_revisions` | `3` |
+| `limits.default_intensity` | `2` |
+
+### provider
+
+| Key | Default | Purpose |
+|---|---|---|
+| `provider.default` | `deepseek` | Provider used when a model name carries no `provider:` prefix |
+
+### providers
+
+A map of provider name to connection settings. `deepseek` and `openrouter`
+are built in with the defaults shown in the example; entries in this map
+override those defaults (e.g. a different `base_url` or `api_key_env`), and
+extra entries define additional providers.
+
+| Key | Default | Purpose |
+|---|---|---|
+| `<name>.base_url` | per provider | OpenAI-compatible endpoint |
+| `<name>.api_key_env` | `DEEPSEEK_API_KEY` / `OPENROUTER_API_KEY` | Name of the env var holding the key |
+| `<name>.headers` | (none) | Extra HTTP headers, e.g. OpenRouter's `HTTP-Referer` / `X-Title` |
+
+A provider without a `base_url` is rejected with a clear error at call time.
+A model prefix naming a provider that is neither built in nor configured
+warns and falls back to the default provider.
+
+### Legacy: `deepseek_base_url`
+
+Before the `providers:` map existed, the DeepSeek base URL was a flat
+top-level key. It is still honored:
+
+- When the YAML has no `providers:` section, `deepseek_base_url` becomes the
+  deepseek provider's base URL.
+- When a `providers:` section exists, it wins over the legacy key.
+
+## Environment variables
+
+### API keys
+
+API keys are read **directly from the process environment** at call time.
+They are not read from `~/.ora/config.yaml` (the config only names which env
+var to use) and are not loaded from a `.env` file.
+
+| Variable | Used for |
+|---|---|
+| `DEEPSEEK_API_KEY` | deepseek provider (default) |
+| `OPENROUTER_API_KEY` | openrouter provider |
+| `OPENAI_API_KEY` | Legacy fallback for deepseek when `DEEPSEEK_API_KEY` is unset |
+| `FIRECRAWL_API_KEY` | Search/scrape; overrides `search.firecrawl_api_key` |
+| `FIRECRAWL_API_URL` | Search/scrape endpoint; overrides `search.firecrawl_api_url` |
+
+### ORA_ settings variables
+
+Every YAML key also has an env-var form using the `ORA_` prefix and `__` as
+the nested separator, e.g. `ORA_MODELS__SUPERVISOR=deepseek-v4-pro`. These are
+loaded by the settings layer from the environment **and from a `.env` file in
+the working directory** (`env_file=".env"`), then the YAML file is applied on
+top, so a YAML key beats its env var.
+
+Common examples:
+
+| Variable | Equivalent YAML |
+|---|---|
+| `ORA_MODELS__SUPERVISOR` | `models.supervisor` |
+| `ORA_MODELS__DEFAULT` | `models.default` |
+| `ORA_PROVIDER__DEFAULT` | `provider.default` |
+| `ORA_DEEPSEEK_BASE_URL` | legacy `deepseek_base_url` |
+| `ORA_LIMITS__MAX_REVISIONS` | `limits.max_revisions` |
+
+## Provider routing
+
+A model name may carry a `provider:model` prefix:
+
+```bash
+open-research-agent research "..." --model openrouter:anthropic/claude-3.5-sonnet
+```
+
+- `openrouter:anthropic/claude-3.5-sonnet` routes to the `openrouter` provider
+  with model `anthropic/claude-3.5-sonnet` (the split is on the first colon;
+  slashes and any later colons stay in the model name).
+- No prefix means the `provider.default` provider.
+- An unknown provider prefix (e.g. `openai:gpt-4.1`) warns and falls back to
+  the default provider, keeping the full name.
+- Each agent role can use a different provider by setting its `models.*`
+  entry with a prefix (supervisor via config only).
+
+## Related
+
+- `open-research-agent config --init` writes the starter file.
+- `open-research-agent config --show` prints the effective configuration,
+  including the resolved provider list and whether each provider's key is set.
+- `open-research-agent --help` documents every CLI flag.
