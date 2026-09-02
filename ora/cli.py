@@ -181,11 +181,6 @@ def research(
         f"  Intensity: {intensity} | Researcher: {researcher_model_name} | Reviewer: {reviewer_model_name}"
     )
 
-    if model:
-        settings.models.researcher = model
-    if reviewer_model:
-        settings.models.reviewer = reviewer_model
-
     from ora.graph import build_plan_graph, build_research_graph
 
     # Phase 1: Generate and review research plan
@@ -266,11 +261,18 @@ def research(
     click.echo()
     research_graph = build_research_graph(intensity=intensity, no_review=no_review)
     plan_result["plan_approved"] = True
+    # Carry CLI model overrides into the graph; agent nodes prefer these
+    # state keys over config values.
+    research_input = dict(plan_result)
+    if model:
+        research_input["researcher_model"] = model
+    if reviewer_model:
+        research_input["reviewer_model"] = reviewer_model
     if quiet:
-        final_state = _spin(lambda: research_graph.invoke(plan_result), message="Researching...")
+        final_state = _spin(lambda: research_graph.invoke(research_input), message="Researching...")
     else:
         final_state = research_graph.invoke(
-            plan_result,
+            research_input,
             {"configurable": {"progress_callback": _print_progress_event}},
         )
 

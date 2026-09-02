@@ -172,3 +172,26 @@ def test_format_findings_includes_pydantic_extraction_data():
     assert "$88" in formatted
     assert "Brilliant Cut Grinder" in formatted
     assert "BCG vs Santa Cruz Shredder" in formatted
+
+
+def test_writer_prefers_state_researcher_model(monkeypatch):
+    """state['researcher_model'] (set by CLI --model) must win over config."""
+    captured = {}
+
+    def fake_get_llm(model_name, temperature=0.3):
+        captured["model_name"] = model_name
+        return FakeLLM()
+
+    monkeypatch.setattr(writer_module, "get_llm", fake_get_llm)
+    monkeypatch.setattr(writer_module, "get_researcher_model", lambda settings: "config-model")
+
+    writer_node(
+        {
+            "query": "Rust vs Go",
+            "intensity": 1,
+            "researcher_model": "openrouter:qwen/qwen3.7-flash",
+            "findings": [],
+        },
+    )
+
+    assert captured["model_name"] == "openrouter:qwen/qwen3.7-flash"

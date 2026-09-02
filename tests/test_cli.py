@@ -522,3 +522,44 @@ class TestCLI:
         # The plan must never be rendered under --hide-plan-on-autoapprove.
         # (The final report may be rendered to stdout when --no-save is used.)
         assert all("# Plan" not in text for text in plan_rendered)
+
+    def test_model_flags_reach_research_state(self, monkeypatch):
+        """--model and --reviewer-model must be carried into the research graph state."""
+        from ora import cli as cli_module
+
+        received_states = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                received_states.append(state)
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "A")
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "research",
+                "Rust vs Go",
+                "--no-save",
+                "--model",
+                "openrouter:qwen/qwen3.7-flash",
+                "--reviewer-model",
+                "openrouter:deepseek/deepseek-v4-pro",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert len(received_states) == 1
+        assert received_states[0]["researcher_model"] == "openrouter:qwen/qwen3.7-flash"
+        assert received_states[0]["reviewer_model"] == "openrouter:deepseek/deepseek-v4-pro"

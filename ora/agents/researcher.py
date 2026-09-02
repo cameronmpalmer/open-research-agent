@@ -461,7 +461,9 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
     about found sources and reviewer feedback.
     """
     settings = load_config()
-    model_name = settings.models.researcher or settings.models.default
+    model_name = (
+        state.get("researcher_model") or settings.models.researcher or settings.models.default
+    )
 
     query = state.get("query", "")
     intensity = state.get("intensity", 2)

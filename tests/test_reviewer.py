@@ -47,3 +47,40 @@ class TestParseReviewerOutput:
         output = '```json\n{"verdict": "PASS", "blocking": [], "required": [], "suggested": [], "contradicting_evidence_found": [], "confidence_recalibrations": {}}\n```'
         verdict = parse_reviewer_output(output)
         assert verdict.verdict == "PASS"
+
+
+class _PassLLM:
+    class _Response:
+        content = (
+            '{"verdict": "PASS", "blocking": [], "required": [], "suggested": [],'
+            ' "contradicting_evidence_found": [], "confidence_recalibrations": {}}'
+        )
+
+    def invoke(self, _prompt):
+        return self._Response()
+
+
+class TestReviewerNodeModelOverride:
+    def test_reviewer_prefers_state_reviewer_model(self, monkeypatch):
+        """state['reviewer_model'] (set by CLI --reviewer-model) must win over config."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        captured = {}
+
+        def fake_get_llm(model_name, temperature=0.2):
+            captured["model_name"] = model_name
+            return _PassLLM()
+
+        monkeypatch.setattr(reviewer_module, "get_llm", fake_get_llm)
+        monkeypatch.setattr(reviewer_module, "get_reviewer_model", lambda settings: "config-model")
+
+        reviewer_node(
+            {
+                "query": "Rust vs Go",
+                "draft_report": "# Research\nbody",
+                "reviewer_model": "openrouter:deepseek/deepseek-v4-pro",
+            },
+        )
+
+        assert captured["model_name"] == "openrouter:deepseek/deepseek-v4-pro"
