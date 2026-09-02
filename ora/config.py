@@ -114,9 +114,35 @@ def load_config(config_path: str | None = None) -> ORASettings:
     return settings
 
 
+# Run-scoped model overrides set by CLI flags (--model / --reviewer-model).
+# The get_*_model helpers consult these first, so every agent and internal
+# helper resolves its model through one path and no call site can bypass the
+# configured model. The CLI sets them for a run and clears them afterwards.
+_run_model_overrides: dict[str, str] = {}
+
+
+def set_model_override(role: str, model_name: str) -> None:
+    """Override a role's model for the current process run.
+
+    Args:
+        role: One of "researcher" or "reviewer" (supervisor has no flag).
+        model_name: Full model name, optionally with a provider: prefix.
+    """
+    _run_model_overrides[role] = model_name
+
+
+def clear_model_overrides() -> None:
+    """Clear all run-scoped model overrides."""
+    _run_model_overrides.clear()
+
+
 def get_researcher_model(settings: ORASettings) -> str:
-    """Get the researcher model, falling back to default."""
-    return settings.models.researcher or settings.models.default
+    """Get the researcher model: run override, else config, else default."""
+    return (
+        _run_model_overrides.get("researcher")
+        or settings.models.researcher
+        or settings.models.default
+    )
 
 
 def get_supervisor_model(settings: ORASettings) -> str:
@@ -125,8 +151,10 @@ def get_supervisor_model(settings: ORASettings) -> str:
 
 
 def get_reviewer_model(settings: ORASettings) -> str:
-    """Get the reviewer model, falling back to the default model."""
-    return settings.models.reviewer or settings.models.default
+    """Get the reviewer model: run override, else config, else default."""
+    return (
+        _run_model_overrides.get("reviewer") or settings.models.reviewer or settings.models.default
+    )
 
 
 def _split_provider(model_name: str) -> tuple[str | None, str]:

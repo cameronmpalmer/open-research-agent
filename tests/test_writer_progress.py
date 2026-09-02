@@ -174,8 +174,10 @@ def test_format_findings_includes_pydantic_extraction_data():
     assert "BCG vs Santa Cruz Shredder" in formatted
 
 
-def test_writer_prefers_state_researcher_model(monkeypatch):
-    """state['researcher_model'] (set by CLI --model) must win over config."""
+def test_writer_uses_researcher_run_override(monkeypatch):
+    """A config-layer researcher override (CLI --model) must reach the writer."""
+    from ora.config import clear_model_overrides, set_model_override
+
     captured = {}
 
     def fake_get_llm(model_name, temperature=0.3):
@@ -183,15 +185,10 @@ def test_writer_prefers_state_researcher_model(monkeypatch):
         return FakeLLM()
 
     monkeypatch.setattr(writer_module, "get_llm", fake_get_llm)
-    monkeypatch.setattr(writer_module, "get_researcher_model", lambda settings: "config-model")
-
-    writer_node(
-        {
-            "query": "Rust vs Go",
-            "intensity": 1,
-            "researcher_model": "openrouter:qwen/qwen3.7-flash",
-            "findings": [],
-        },
-    )
+    set_model_override("researcher", "openrouter:qwen/qwen3.7-flash")
+    try:
+        writer_node({"query": "Rust vs Go", "intensity": 1, "findings": []})
+    finally:
+        clear_model_overrides()
 
     assert captured["model_name"] == "openrouter:qwen/qwen3.7-flash"

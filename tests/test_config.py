@@ -234,3 +234,43 @@ class TestProviders:
         monkeypatch.setenv("ORA_DEEPSEEK_BASE_URL", "https://env-legacy.example.com")
         config = load_config("/nonexistent-config.yaml")
         assert config.deepseek_base_url == "https://env-legacy.example.com"
+
+
+class TestRunModelOverrides:
+    """Run-scoped overrides set by CLI flags (ora.config.set_model_override)."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_overrides(self):
+        from ora.config import clear_model_overrides
+
+        yield
+        clear_model_overrides()
+
+    def test_researcher_override_beats_config(self):
+        from ora.config import ModelSettings, set_model_override
+
+        settings = ORASettings(models=ModelSettings(researcher="config-model"))
+        set_model_override("researcher", "openrouter:qwen/qwen3.7-flash")
+        assert get_researcher_model(settings) == "openrouter:qwen/qwen3.7-flash"
+
+    def test_reviewer_override_beats_config(self):
+        from ora.config import ModelSettings, set_model_override
+
+        settings = ORASettings(models=ModelSettings(reviewer="config-model"))
+        set_model_override("reviewer", "openrouter:deepseek/deepseek-v4-pro")
+        assert get_reviewer_model(settings) == "openrouter:deepseek/deepseek-v4-pro"
+
+    def test_clear_restores_config_fallback(self):
+        from ora.config import ModelSettings, clear_model_overrides, set_model_override
+
+        settings = ORASettings(models=ModelSettings(default="my-default"))
+        set_model_override("researcher", "openrouter:qwen/qwen3.7-flash")
+        clear_model_overrides()
+        assert get_researcher_model(settings) == "my-default"
+
+    def test_supervisor_unaffected_by_overrides(self):
+        from ora.config import ModelSettings, set_model_override
+
+        settings = ORASettings(models=ModelSettings(default="my-default"))
+        set_model_override("researcher", "openrouter:qwen/qwen3.7-flash")
+        assert get_supervisor_model(settings) == "my-default"

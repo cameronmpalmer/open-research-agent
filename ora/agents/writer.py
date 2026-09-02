@@ -128,7 +128,7 @@ def writer_node(state: ResearchState, config: RunnableConfig | None = None) -> d
     Summary, Key Findings, and Evidence Gaps sections.
     """
     settings = load_config()
-    model_name = state.get("researcher_model") or get_researcher_model(settings)
+    model_name = get_researcher_model(settings)
 
     llm = get_llm(model_name, temperature=0.3)
 

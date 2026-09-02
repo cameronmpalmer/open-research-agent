@@ -61,10 +61,11 @@ class _PassLLM:
 
 
 class TestReviewerNodeModelOverride:
-    def test_reviewer_prefers_state_reviewer_model(self, monkeypatch):
-        """state['reviewer_model'] (set by CLI --reviewer-model) must win over config."""
+    def test_reviewer_uses_reviewer_run_override(self, monkeypatch):
+        """A config-layer reviewer override (CLI --reviewer-model) must reach the reviewer."""
         from ora.agents import reviewer as reviewer_module
         from ora.agents.reviewer import reviewer_node
+        from ora.config import clear_model_overrides, set_model_override
 
         captured = {}
 
@@ -73,14 +74,10 @@ class TestReviewerNodeModelOverride:
             return _PassLLM()
 
         monkeypatch.setattr(reviewer_module, "get_llm", fake_get_llm)
-        monkeypatch.setattr(reviewer_module, "get_reviewer_model", lambda settings: "config-model")
-
-        reviewer_node(
-            {
-                "query": "Rust vs Go",
-                "draft_report": "# Research\nbody",
-                "reviewer_model": "openrouter:deepseek/deepseek-v4-pro",
-            },
-        )
+        set_model_override("reviewer", "openrouter:deepseek/deepseek-v4-pro")
+        try:
+            reviewer_node({"query": "Rust vs Go", "draft_report": "# Research\nbody"})
+        finally:
+            clear_model_overrides()
 
         assert captured["model_name"] == "openrouter:deepseek/deepseek-v4-pro"

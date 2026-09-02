@@ -79,11 +79,6 @@ class ResearchState(TypedDict, total=False):
     query: str
     intensity: Literal[1, 2, 3, 4, 5]
 
-    # Optional per-run model overrides set by CLI flags (--model /
-    # --reviewer-model); agents prefer these over config values when present.
-    researcher_model: str
-    reviewer_model: str
-
     # Plan
     research_plan: str
     plan_approved: bool

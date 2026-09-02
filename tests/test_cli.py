@@ -523,11 +523,13 @@ class TestCLI:
         # (The final report may be rendered to stdout when --no-save is used.)
         assert all("# Plan" not in text for text in plan_rendered)
 
-    def test_model_flags_reach_research_state(self, monkeypatch):
-        """--model and --reviewer-model must be carried into the research graph state."""
+    def test_model_flags_install_config_overrides(self, monkeypatch):
+        """--model and --reviewer-model must install run-scoped config overrides."""
         from ora import cli as cli_module
 
         received_states = []
+        override_calls = []
+        clear_calls = []
 
         class FakePlanGraph:
             def invoke(self, state, config=None):
@@ -538,6 +540,14 @@ class TestCLI:
                 received_states.append(state)
                 return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
 
+        def record_set(role, model_name):
+            override_calls.append((role, model_name))
+
+        def record_clear():
+            clear_calls.append(True)
+
+        monkeypatch.setattr(cli_module, "set_model_override", record_set)
+        monkeypatch.setattr(cli_module, "clear_model_overrides", record_clear)
         monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
         monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
         monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
@@ -560,6 +570,9 @@ class TestCLI:
         )
 
         assert result.exit_code == 0
-        assert len(received_states) == 1
-        assert received_states[0]["researcher_model"] == "openrouter:qwen/qwen3.7-flash"
-        assert received_states[0]["reviewer_model"] == "openrouter:deepseek/deepseek-v4-pro"
+        assert ("researcher", "openrouter:qwen/qwen3.7-flash") in override_calls
+        assert ("reviewer", "openrouter:deepseek/deepseek-v4-pro") in override_calls
+        assert clear_calls  # overrides cleared after the run
+        # Model overrides travel via config, not via graph state.
+        assert "researcher_model" not in received_states[0]
+        assert "reviewer_model" not in received_states[0]

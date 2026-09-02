@@ -54,7 +54,7 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
     from ora.progress import emit_progress
 
     settings = load_config()
-    model_name = state.get("reviewer_model") or get_reviewer_model(settings)
+    model_name = get_reviewer_model(settings)
 
     emit_progress(config, "Reviewer: auditing draft report...", kind="review")
 

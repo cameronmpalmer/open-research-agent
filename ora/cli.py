@@ -13,10 +13,12 @@ import yaml
 from ora.config import (
     DEFAULT_PROVIDERS,
     _resolve_provider,
+    clear_model_overrides,
     get_researcher_model,
     get_reviewer_model,
     get_supervisor_model,
     load_config,
+    set_model_override,
 )
 from ora.usage import UsageCollector, usage_collection
 
@@ -272,25 +274,27 @@ def research(
     click.echo()
     research_graph = build_research_graph(intensity=intensity, no_review=no_review)
     plan_result["plan_approved"] = True
-    # Carry CLI model overrides into the graph; agent nodes prefer these
-    # state keys over config values.
-    research_input = dict(plan_result)
+    # CLI model flags become run-scoped config overrides so every agent and
+    # internal helper resolves them through the same config path.
     if model:
-        research_input["researcher_model"] = model
+        set_model_override("researcher", model)
     if reviewer_model:
-        research_input["reviewer_model"] = reviewer_model
-    if quiet:
-        final_state = _spin(
-            lambda: _run_collected(collector, research_graph.invoke, research_input),
-            message="Researching...",
-        )
-    else:
-        final_state = _run_collected(
-            collector,
-            research_graph.invoke,
-            research_input,
-            {"configurable": {"progress_callback": _print_progress_event}},
-        )
+        set_model_override("reviewer", reviewer_model)
+    try:
+        if quiet:
+            final_state = _spin(
+                lambda: _run_collected(collector, research_graph.invoke, plan_result),
+                message="Researching...",
+            )
+        else:
+            final_state = _run_collected(
+                collector,
+                research_graph.invoke,
+                plan_result,
+                {"configurable": {"progress_callback": _print_progress_event}},
+            )
+    finally:
+        clear_model_overrides()
 
     if intensity < 3:
         if no_review:
