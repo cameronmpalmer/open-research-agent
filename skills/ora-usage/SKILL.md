@@ -46,10 +46,10 @@ root.
 
 ```yaml
 models:
-  default: deepseek-v4-flash       # researcher + writer fallback
-  researcher: ~                     # overrides default
-  supervisor: deepseek-v4-pro       # planning (no CLI flag exists)
-  reviewer: deepseek-v4-pro
+  default: deepseek-v4-flash       # every role falls back to this; optional
+  # researcher: ~                  # per-role overrides for researcher+writer,
+  # supervisor: ~                  # supervisor (planning, no CLI flag),
+  # reviewer: ~                    # and reviewer (--reviewer-model overrides)
 search:
   provider: firecrawl
 limits:

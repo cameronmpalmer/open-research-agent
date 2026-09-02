@@ -9,7 +9,14 @@ from datetime import datetime
 import click
 import yaml
 
-from ora.config import DEFAULT_PROVIDERS, _resolve_provider, get_researcher_model, load_config
+from ora.config import (
+    DEFAULT_PROVIDERS,
+    _resolve_provider,
+    get_researcher_model,
+    get_reviewer_model,
+    get_supervisor_model,
+    load_config,
+)
 
 logging.captureWarnings(True)
 warnings.filterwarnings("ignore", message=".*allowed_objects.*", module="langgraph")
@@ -169,7 +176,7 @@ def research(
     click.echo(f"ORA Research: {query}")
     settings = load_config()
     researcher_model_name = model or settings.models.researcher or settings.models.default
-    reviewer_model_name = reviewer_model or settings.models.reviewer or "deepseek-v4-pro"
+    reviewer_model_name = reviewer_model or settings.models.reviewer or settings.models.default
     click.echo(
         f"  Intensity: {intensity} | Researcher: {researcher_model_name} | Reviewer: {reviewer_model_name}"
     )
@@ -350,9 +357,6 @@ def config(show, init):
         default_config = {
             "models": {
                 "default": "deepseek-v4-flash",
-                "researcher": "deepseek-v4-flash",
-                "supervisor": "deepseek-v4-pro",
-                "reviewer": "deepseek-v4-pro",
             },
             "search": {
                 "provider": "firecrawl",
@@ -383,14 +387,10 @@ def config(show, init):
     settings = load_config()
     click.echo(f"Config file: {config_path}")
     click.echo()
-    click.echo(
-        f"Supervisor (planning & routing): {settings.models.supervisor or 'deepseek-v4-pro'}"
-    )
+    click.echo(f"Supervisor (planning & routing): {get_supervisor_model(settings)}")
     click.echo(f"Researcher (web search & source eval): {get_researcher_model(settings)}")
-    click.echo(
-        f"Writer (report synthesis): {settings.models.researcher or settings.models.default}"
-    )
-    click.echo(f"Reviewer (adversarial audit): {settings.models.reviewer or 'deepseek-v4-pro'}")
+    click.echo(f"Writer (report synthesis): {get_researcher_model(settings)}")
+    click.echo(f"Reviewer (adversarial audit): {get_reviewer_model(settings)}")
     click.echo()
     click.echo(f"Search backend: {settings.search.provider}")
     click.echo(f"Firecrawl URL: {settings.search.firecrawl_api_url}")

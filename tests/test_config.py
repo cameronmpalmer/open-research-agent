@@ -25,7 +25,7 @@ class TestORASettings:
         assert settings.deepseek_base_url == "https://api.deepseek.com"
         assert settings.provider.default == "deepseek"
         assert settings.providers == {}
-        assert settings.models.reviewer == "deepseek-v4-pro"
+        assert settings.models.reviewer is None  # unset roles fall back to models.default
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("ORA_MODELS__DEFAULT", "deepseek-v4-flash")
@@ -52,18 +52,36 @@ class TestLoadConfig:
         settings = ORASettings(models=ModelSettings(researcher="deepseek-v4-pro"))
         assert get_researcher_model(settings) == "deepseek-v4-pro"
 
-    def test_get_reviewer_model_defaults_to_v4_pro(self):
+    def test_get_reviewer_model_defaults_to_default(self):
         settings = ORASettings()
-        assert get_reviewer_model(settings) == "deepseek-v4-pro"
+        assert get_reviewer_model(settings) == settings.models.default
 
     def test_get_reviewer_model_fallback_when_reviewer_is_none(self):
         from ora.config import ModelSettings
 
-        settings = ORASettings(models=ModelSettings(reviewer=None))
+        settings = ORASettings(models=ModelSettings(default="my-default", reviewer=None))
+        assert get_reviewer_model(settings) == "my-default"
+
+    def test_get_reviewer_model_uses_reviewer_override(self):
+        from ora.config import ModelSettings
+
+        settings = ORASettings(
+            models=ModelSettings(default="my-default", reviewer="deepseek-v4-pro")
+        )
         assert get_reviewer_model(settings) == "deepseek-v4-pro"
 
-    def test_get_supervisor_model_defaults_to_v4_pro(self):
-        settings = ORASettings()
+    def test_get_supervisor_model_defaults_to_default(self):
+        from ora.config import ModelSettings
+
+        settings = ORASettings(models=ModelSettings(default="my-default"))
+        assert get_supervisor_model(settings) == "my-default"
+
+    def test_get_supervisor_model_uses_supervisor_override(self):
+        from ora.config import ModelSettings
+
+        settings = ORASettings(
+            models=ModelSettings(default="my-default", supervisor="deepseek-v4-pro")
+        )
         assert get_supervisor_model(settings) == "deepseek-v4-pro"
 
 
@@ -73,6 +91,12 @@ class FakeChatOpenAI:
 
 
 class TestGetLlmRouting:
+    @pytest.fixture(autouse=True)
+    def _isolate_from_user_config(self, monkeypatch):
+        """get_llm calls load_config(); keep routing tests independent of the
+        developer's real ~/.ora/config.yaml by substituting pure defaults."""
+        monkeypatch.setattr("ora.config.load_config", lambda *a, **kw: ORASettings())
+
     def _capture_chat_openai(self, monkeypatch):
         captures = {}
 
@@ -128,10 +152,9 @@ class TestGetLlmRouting:
         monkeypatch.setenv("MY_API_KEY", "sk-custom")
         config_file = tmp_path / "config.yaml"
         config_file.write_text("providers:\n  custom:\n    api_key_env: MY_API_KEY\n")
-        from ora.config import load_config as load_config_fn
 
         monkeypatch.setattr(
-            "ora.config.load_config", lambda *a, **kw: load_config_fn(str(config_file))
+            "ora.config.load_config", lambda *a, **kw: load_config(str(config_file))
         )
         with pytest.raises(ValueError, match="base_url"):
             get_llm("custom:my-model")

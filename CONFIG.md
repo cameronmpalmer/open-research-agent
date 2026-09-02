@@ -31,10 +31,11 @@ and legacy key, annotated:
 # ~/.ora/config.yaml
 
 models:
-  default: deepseek-v4-flash       # researcher + writer fallback
-  researcher: deepseek-v4-flash    # overrides default for researcher + writer
-  supervisor: deepseek-v4-pro      # planning; no CLI flag exists for this
-  reviewer: deepseek-v4-pro        # adversarial review (intensity 3+)
+  default: deepseek-v4-flash       # every role falls back to this
+  # Optional per-role overrides; any unset role uses models.default:
+  # researcher: <model>            # researcher agent, extractor, and writer
+  # supervisor: <model>            # planning; no CLI flag exists for this
+  # reviewer: <model>              # adversarial review (intensity 3+)
 
 search:
   provider: firecrawl
@@ -69,15 +70,17 @@ providers:
 
 ### models
 
-Which model each agent role uses. Model names may carry a `provider:model`
-prefix (see [Provider routing](#provider-routing)).
+Which model each agent role uses. **`models.default` applies to every role**:
+an unset `researcher`, `supervisor`, or `reviewer` falls back to `default`.
+Model names may carry a `provider:model` prefix (see
+[Provider routing](#provider-routing)).
 
 | Key | Default | Used by |
 |---|---|---|
-| `models.default` | `deepseek-v4-flash` | Researcher and writer when `researcher` is unset |
-| `models.researcher` | (falls back to `default`) | Researcher agent, per-source extractor, and writer |
-| `models.supervisor` | `deepseek-v4-pro` | Supervisor (planning and routing); config only, no CLI flag |
-| `models.reviewer` | `deepseek-v4-pro` | Reviewer (intensity 3+); overridable with `--reviewer-model` |
+| `models.default` | `deepseek-v4-flash` | Every role that has no explicit override |
+| `models.researcher` | (falls back to `models.default`) | Researcher agent, per-source extractor, and writer |
+| `models.supervisor` | (falls back to `models.default`) | Supervisor (planning and routing); config only, no CLI flag |
+| `models.reviewer` | (falls back to `models.default`) | Reviewer (intensity 3+); overridable with `--reviewer-model` |
 
 CLI overrides: `--model` sets the researcher + writer model for one run;
 `--reviewer-model` sets the reviewer model for one run.

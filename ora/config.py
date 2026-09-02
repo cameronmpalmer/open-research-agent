@@ -22,7 +22,7 @@ class ModelSettings(BaseModel):
     default: str = "deepseek-v4-flash"
     researcher: str | None = None
     supervisor: str | None = None
-    reviewer: str | None = "deepseek-v4-pro"
+    reviewer: str | None = None
 
 
 class ProviderDefaultSettings(BaseModel):
@@ -120,13 +120,13 @@ def get_researcher_model(settings: ORASettings) -> str:
 
 
 def get_supervisor_model(settings: ORASettings) -> str:
-    """Get the supervisor model, falling back to deepseek-v4-pro."""
-    return settings.models.supervisor or "deepseek-v4-pro"
+    """Get the supervisor model, falling back to the default model."""
+    return settings.models.supervisor or settings.models.default
 
 
 def get_reviewer_model(settings: ORASettings) -> str:
-    """Get the reviewer model, falling back to deepseek-v4-pro."""
-    return settings.models.reviewer or "deepseek-v4-pro"
+    """Get the reviewer model, falling back to the default model."""
+    return settings.models.reviewer or settings.models.default
 
 
 def _split_provider(model_name: str) -> tuple[str | None, str]:
