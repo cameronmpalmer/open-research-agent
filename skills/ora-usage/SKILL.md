@@ -31,14 +31,18 @@ For self-hosted Firecrawl: set `FIRECRAWL_API_URL=http://localhost:3002`.
 | Stdout only, no file | `ora research "query" --no-save` |
 | Skip interactive approval | `ora research "query" -y` (`--auto-approve`) |
 | Minimal output | `ora research "query" --quiet` |
-| Change researcher model | `ora research "query" --model deepseek-v4-chat` |
+| Change researcher model | `ora research "query" --model openrouter:anthropic/claude-3.5-sonnet` |
 | Change reviewer model | `ora research "query" --reviewer-model deepseek-v4-pro` |
 | Limit reviewer rounds | `ora research "query" --max-revisions 2` |
 | Show config | `ora config --show` |
 
 ## Configuration
 
-Config file: `~/.ora/config.yaml`. **Priority: env vars > config file > defaults.**
+Config file: `~/.ora/config.yaml`. **Priority: YAML file > env vars > defaults**
+(a key present in the YAML file overrides its env var). API keys are read from
+the process environment only, never from the YAML file. For the full reference
+(providers:, output:, limits:, env-var forms), read `CONFIG.md` in the repo
+root.
 
 ```yaml
 models:

@@ -71,6 +71,9 @@ The config file is stored at:
 ~/.ora/config.yaml
 ```
 
+See [CONFIG.md](CONFIG.md) for the complete reference of the `config.yaml`
+format, the available settings, and their environment-variable equivalents.
+
 ## Using a provider prefix
 
 Any model name can carry a `provider:model` prefix to select the backend:
