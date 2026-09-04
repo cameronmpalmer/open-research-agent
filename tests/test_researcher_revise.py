@@ -215,55 +215,88 @@ class TestResearcherNodeExhaustion:
         assert result["review_items"]
         assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
 
-    def test_revise_single_query_round_keeps_items_open(self, monkeypatch):
-        """Regression guard: even with multi-query revise semantics, a round
-        that has only ONE fresh query searches just that query (the cap is
-        min(len(fresh_queries), 3)), so a zero-yield single search must NOT
-        exhaust the open items (fewer than two attempts this pass; a future
-        REVISE pass should try other variants)."""
+    def test_revise_single_item_query_round_keeps_items_open(self, monkeypatch):
+        """Regression guard: with only ONE fresh item-targeted query to
+        search, the >= 2 exhaustion floor is not reached, so a zero-yield
+        single search must NOT exhaust the open items (fewer than two
+        attempts this pass; a future REVISE pass should try other variants)."""
         state = _revise_state(
-            search_queries=["fresh query one"],
+            search_queries=["leftover plan query one"],
             executed_queries=[],
         )
-        # The single fresh query yields no candidate URLs; with only one
-        # executed query the >= 2 exhaustion floor is not reached.
         monkeypatch.setattr(
-            "ora.tools.search.web_search",
-            _FakeTool("No results matched your search."),
+            "ora.agents.researcher.get_llm",
+            lambda *a, **kw: _FakeLLM("item query one\n"),
+        )
+        searched = []
+
+        def fake_search(args):
+            searched.append(args["query"])
+            return "No results matched your search."
+
+        monkeypatch.setattr(
+            "ora.tools.search.web_search", types.SimpleNamespace(invoke=fake_search)
         )
 
         result = researcher_node(state)
 
+        # Only the single item query ran; leftover plan queries are skipped.
+        assert searched == ["item query one"]
+        assert "leftover plan query one" not in searched
         assert result["last_round_new_sources"] == 0
         assert result["review_items"]
         assert all(item["status"] == "open" for item in result["review_items"])
 
-    def test_revise_two_zero_yield_queries_with_min_met_marks_exhausted(self, monkeypatch):
-        """A min-met revise round with TWO fresh zero-yield queries runs both
-        (multi-query revise semantics), reaches the >= 2 floor, and exhausts
-        the open items in one pass."""
+    def test_revise_skips_leftover_plan_queries_and_uses_item_queries(self, monkeypatch):
+        """Regression guard (I-1 re-review): on a min-met revise pass with
+        open items, leftover untargeted plan search_queries must NOT be
+        searched on round 1. The per-item generator runs instead, and items
+        exhaust only after >= 2 zero-yield ITEM searches."""
         state = _revise_state(
-            search_queries=["fresh query one", "fresh query two"],
+            search_queries=["leftover plan query one", "leftover plan query two"],
             executed_queries=[],
         )
+        llm_calls = []
+
+        def fake_get_llm(*a, **kw):
+            llm_calls.append(True)
+            return _FakeLLM("item query one\nitem query two\n")
+
+        monkeypatch.setattr("ora.agents.researcher.get_llm", fake_get_llm)
+
+        searched = []
+
+        def fake_search(args):
+            searched.append(args["query"])
+            return "No results matched your search."
+
         monkeypatch.setattr(
-            "ora.tools.search.web_search",
-            _FakeTool("No results matched your search."),
+            "ora.tools.search.web_search", types.SimpleNamespace(invoke=fake_search)
         )
 
         result = researcher_node(state)
 
+        assert llm_calls, "per-item LLM generator should have run"
+        assert len(searched) >= 2
+        assert all(q.startswith("item query") for q in searched), (
+            f"searches must come from per-item output, not leftover plan queries: {searched}"
+        )
+        assert all("leftover plan query" not in q for q in searched)
         assert result["last_round_new_sources"] == 0
         assert result["review_items"]
         assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
 
     def test_revise_search_failures_count_as_attempts(self, monkeypatch):
-        """A failed search is still a genuine attempt: two failed searches on
-        a min-met revise round with open items reach the >= 2 floor and
-        exhaust the items (zero new sources)."""
+        """A failed search is still a genuine attempt: two failed ITEM
+        searches on a min-met revise round with open items reach the >= 2
+        floor and exhaust the items (zero new sources)."""
         state = _revise_state(
-            search_queries=["fresh query one", "fresh query two"],
+            search_queries=["leftover plan query one", "leftover plan query two"],
             executed_queries=[],
+        )
+        monkeypatch.setattr(
+            "ora.agents.researcher.get_llm",
+            lambda *a, **kw: _FakeLLM("item query one\nitem query two\n"),
         )
         # Both searches fail at the tool level (no candidate URLs either).
         monkeypatch.setattr(
@@ -314,8 +347,14 @@ class TestResearcherNodeProgress:
         """A revise pass that finds a new source reports positive deltas and
         leaves the review items open (no exhaustion)."""
         state = _revise_state(
-            search_queries=["enterprise pricing details 2026"],
+            search_queries=["leftover plan query one"],
             executed_queries=[],
+        )
+        # Round 1 targets items, not leftover plan queries; the one item
+        # query finds a source.
+        monkeypatch.setattr(
+            "ora.agents.researcher.get_llm",
+            lambda *a, **kw: _FakeLLM("enterprise pricing details 2026\n"),
         )
 
         monkeypatch.setattr(

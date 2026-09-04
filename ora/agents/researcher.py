@@ -636,12 +636,27 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             kind="info",
         )
 
+        # True on the forced revise round of a pass that already met
+        # min_sources with open review items: queries must be item-targeted
+        # and up to three of them searched before the round ends (see below).
+        item_targeted_revise = bool(revise_round and open_items and len(sources) >= min_sources)
+
         if round_num == 1:
-            plan_queries = state.get("search_queries", [])
-            if plan_queries:
-                queries_for_round = plan_queries
+            if item_targeted_revise:
+                # On this round, skip leftover plan search_queries: they are
+                # untargeted first-pass queries that the researcher never
+                # consumed, and zero-yield searches on them would trip the
+                # whole-pass exhaustion rule below without the per-item gap
+                # generator ever running. Go straight to the item-targeted
+                # path. Plan queries remain the round-1 source for first
+                # passes and for revise passes still chasing min_sources.
+                queries_for_round = round_gap_queries()
             else:
-                queries_for_round = list(generate_search_queries(query, intensity))
+                plan_queries = state.get("search_queries", [])
+                if plan_queries:
+                    queries_for_round = plan_queries
+                else:
+                    queries_for_round = list(generate_search_queries(query, intensity))
         else:
             # Gap queries: adapt to what's been found and what the reviewer
             # flagged. Falls back to templates on failure. With structured
@@ -693,16 +708,15 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             kind="search",
         )
 
-        # On a revise round with open items where min_sources is already met,
-        # do NOT end the round after the first query: _scrape_and_collect
-        # returns True immediately at min_sources, which would otherwise give
-        # the open items only a single-query "attempt" per pass. Search up to
+        # On an item-targeted revise round (min_sources already met), do NOT
+        # end the round after the first query: _scrape_and_collect returns
+        # True immediately at min_sources, which would otherwise give the
+        # open items only a single-query "attempt" per pass. Search up to
         # three fresh queries instead so a genuine multi-query attempt happens
         # within one pass (the exhaustion rule below requires >= 2 executed
         # searches). Rounds still chasing min_sources keep the old behavior
         # of searching every fresh query.
-        multi_query_revise = bool(revise_round and open_items and len(sources) >= min_sources)
-        round_queries = fresh_queries if not multi_query_revise else fresh_queries[:3]
+        round_queries = fresh_queries if not item_targeted_revise else fresh_queries[:3]
         for q in round_queries:
             if len(sources) >= min_sources and not revise_round:
                 break
@@ -761,11 +775,11 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
                 model_name=model_name,
                 force_scrape=revise_round,
             )
-            if scrape_done and not multi_query_revise:
+            if scrape_done and not item_targeted_revise:
                 # force_scrape suppresses _scrape_and_collect's internal
                 # early-return at min_sources, so all eligible URLs for this
                 # query are scraped. Its True return still ends the query
-                # loop on ordinary rounds; multi-query revise rounds keep
+                # loop on ordinary rounds; item-targeted revise rounds keep
                 # searching up to the 3-query cap so open items get a
                 # genuine attempt.
                 break
@@ -775,11 +789,12 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
 
     # Exhaustion rule: mark open items evidence_exhausted only when this was
     # a review-driven revise pass, open items exist, the WHOLE pass produced
-    # zero new sources, AND at least two queries were actually searched. On a
-    # revise round where min_sources is already met the query loop now runs
-    # up to three searches (multi_query_revise above), so two zero-yield
-    # searches are a genuine multi-query attempt; one search (or zero after
-    # regeneration) leaves items open so attempts can accumulate across
+    # zero new sources, AND at least two queries were actually searched. On an
+    # item-targeted revise round where min_sources is already met the query
+    # loop now runs up to three searches (item_targeted_revise above), so two
+    # zero-yield searches are a genuine multi-query attempt; one search (or
+    # zero after regeneration) leaves items open so attempts can accumulate
+    # across
     # REVISE passes. NOTE for the amended Task 4 routing contract: REVISE
     # routes back to the researcher iff revision_count < 3 AND at least one
     # open (non-exhausted) review item remains, otherwise the graph ends;
