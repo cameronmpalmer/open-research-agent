@@ -23,6 +23,25 @@ def _invoke_supervisor(prompt: str) -> str:
 
 _FENCE_RE = re.compile(r"```\s*search_queries\s*\n(.*?)```", re.DOTALL)
 
+# Hard cap on writer-reviewer revision cycles. Shared by the routing budget
+# (route_after_reviewer) and the reviewer's audit context (audit_number /
+# max_audits) so the reviewer knows when it is at its final audit.
+MAX_REVISIONS = 3
+
+
+def _verdict_value(state: ResearchState) -> str:
+    """Return the review verdict string from state, tolerating both a
+    ReviewVerdict model and its dict form (e.g. from a checkpoint).
+
+    Falls back to "REVISE" when the recorded verdict carries no readable
+    value, matching the pre-existing routing assumption that a review object
+    without a PASS verdict is a revision request.
+    """
+    verdict = state.get("review_verdict")
+    if isinstance(verdict, dict):
+        return verdict.get("verdict", "REVISE")
+    return getattr(verdict, "verdict", "REVISE")
+
 
 def _search_queries_fence_found(plan_text: str) -> bool:
     """Return True if the plan text contains a search_queries code fence,
@@ -146,12 +165,12 @@ def route_after_reviewer(state: ResearchState) -> Literal["researcher", "__end__
     if verdict is None:
         return "__end__"
 
-    v = verdict.verdict if hasattr(verdict, "verdict") else "REVISE"
+    v = _verdict_value(state)
     revision_count = state.get("revision_count", 0)
 
     if v == "PASS":
         return "__end__"
-    elif revision_count < 3:
+    elif revision_count < MAX_REVISIONS:
         # Convergent loop: only keep revising while at least one open
         # (non-exhausted) review item remains. Zero-progress passes still
         # route back while an open item remains, letting per-item attempts

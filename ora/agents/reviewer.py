@@ -5,6 +5,7 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
+from ora.agents.supervisor import MAX_REVISIONS
 from ora.config import get_llm, get_reviewer_model, load_config
 from ora.prompts import REVIEWER_PROMPT
 from ora.state import ResearchState, ReviewVerdict
@@ -76,7 +77,11 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
     prompt additionally receives the previous items with their statuses, the
     writer's change notes, and the count of new sources found since the last
     audit, so the reviewer can verify the writer's claimed dispositions
-    against the updated report instead of re-raising resolved items.
+    against the updated report instead of re-raising resolved items. The
+    audit number and the shared revision budget (MAX_REVISIONS) are passed
+    too, so the reviewer knows when it is at its final audit and folds
+    residual addressed/accepted concerns into unresolvable_gaps instead of
+    issuing a REVISE that the routing cap would discard.
     """
     from ora.progress import emit_progress
 
@@ -92,9 +97,17 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
         "\n".join(f"- [{i.get('category')}] ({i.get('status')}) {i.get('text')}" for i in items)
         or "(first audit)"
     )
+    # The audit currently being performed corresponds to the count this node
+    # is about to return (revision_count is incremented below), so the prompt
+    # gets revision_count + 1 as the audit number and the shared budget as
+    # the cap. When audit_number == MAX_REVISIONS the reviewer is at its
+    # FINAL audit and must not REVISE for residual addressed/accepted items.
+    audit_number = state.get("revision_count", 0) + 1
     prompt_text = REVIEWER_PROMPT.format(
         query=state.get("query", ""),
         report=state.get("draft_report", ""),
+        audit_number=audit_number,
+        max_audits=MAX_REVISIONS,
         review_items=items_text,
         writer_change_notes=state.get("writer_change_notes", "") or "(no revision notes)",
         new_sources_count=str(state.get("last_round_new_sources", 0)),

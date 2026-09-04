@@ -320,6 +320,30 @@ def research(
         )
         return
 
+    # Surface a REVISE-capped or gap-accepting end: when the final audit
+    # still ended on REVISE (revision budget exhausted with open items) or
+    # accepted evidence gaps, the user should know the report finalized with
+    # unresolved review items rather than assuming a clean PASS.
+    if final_state.get("review_verdict") is not None:
+        from ora.agents.supervisor import _verdict_value
+
+        review_verdict = final_state.get("review_verdict")
+        if isinstance(review_verdict, dict):
+            gap_texts = list(review_verdict.get("unresolvable_gaps") or [])
+        else:
+            gap_texts = list(getattr(review_verdict, "unresolvable_gaps", None) or [])
+        review_items = final_state.get("review_items") or []
+        open_items = [i for i in review_items if i.get("status") == "open"]
+        exhausted_items = [i for i in review_items if i.get("status") == "evidence_exhausted"]
+        if _verdict_value(final_state) == "REVISE" or open_items or gap_texts:
+            n = len(open_items)
+            m = len(exhausted_items) + len(gap_texts)
+            click.echo(
+                f"  ⚠️  Report finalized with unresolved review items: {n} open,"
+                f" {m} exhausted (see report's Changes made / evidence notes).",
+                err=True,
+            )
+
     draft = final_state.get("final_report") or final_state.get(
         "draft_report", "No report generated."
     )

@@ -263,6 +263,77 @@ class TestCLI:
         assert "--no-review is only relevant for intensity 3+" in result.output
         assert "--max-revisions is only relevant for intensity 3+" in result.output
 
+    def _patch_research_graph(self, monkeypatch, research_final_state):
+        """Monkeypatch the CLI research flow to return a fixed final state
+        from a fake research graph (follows the existing FakeGraph style)."""
+        from ora import cli as cli_module
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                return research_final_state
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "A")
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+    def test_research_warns_on_revise_capped_end(self, monkeypatch):
+        """A final REVISE verdict capped by the revision budget must surface a
+        warning with the open/exhausted item counts."""
+        from ora.state import ReviewVerdict
+
+        self._patch_research_graph(
+            monkeypatch,
+            {
+                "draft_report": "# Research\nbody\n\n## Changes made\n- partial.\n",
+                "sources": [],
+                "findings": [],
+                "review_verdict": ReviewVerdict(verdict="REVISE", blocking=["still missing"]),
+                "review_items": [
+                    {"category": "blocking", "text": "still missing", "status": "open"}
+                ],
+                "revision_count": 3,
+            },
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "--no-save"])
+
+        assert result.exit_code == 0
+        assert "Report finalized with unresolved review items: 1 open, 0 exhausted" in result.output
+
+    def test_research_warns_on_pass_with_accepted_gaps(self, monkeypatch):
+        """A final PASS that accepted evidence gaps (unresolvable_gaps) also
+        surfaces the gap count so the user checks the report's evidence notes."""
+        from ora.state import ReviewVerdict
+
+        self._patch_research_graph(
+            monkeypatch,
+            {
+                "draft_report": "# Research\nbody\n\n## Evidence gaps\nNot available.\n",
+                "sources": [],
+                "findings": [],
+                "review_verdict": ReviewVerdict(
+                    verdict="PASS",
+                    unresolvable_gaps=["2026 market data unavailable"],
+                ),
+                "review_items": [],
+                "revision_count": 2,
+            },
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "--no-save"])
+
+        assert result.exit_code == 0
+        assert "Report finalized with unresolved review items: 0 open, 1 exhausted" in result.output
+
     def test_research_edit_path_modifies_plan(self, monkeypatch):
         from ora import cli as cli_module
 

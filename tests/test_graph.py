@@ -139,6 +139,29 @@ class TestRouting:
         }
         assert route_after_reviewer(state) == "__end__"
 
+    def test_route_after_reviewer_dict_form_pass_ends(self):
+        """Checkpointed dict-form verdicts read their own 'verdict' key: a
+        dict PASS must end the loop, not be misread as a REVISE."""
+        from ora.agents.supervisor import route_after_reviewer
+
+        state: ResearchState = {
+            "review_verdict": {"verdict": "PASS"},
+            "revision_count": 1,
+            "review_items": [{"category": "blocking", "text": "add pricing", "status": "open"}],
+        }
+        assert route_after_reviewer(state) == "__end__"
+
+    def test_route_after_reviewer_dict_form_revise_with_open_item_routes(self):
+        """Dict-form REVISE verdicts with an open item keep looping."""
+        from ora.agents.supervisor import route_after_reviewer
+
+        state: ResearchState = {
+            "review_verdict": {"verdict": "REVISE"},
+            "revision_count": 1,
+            "review_items": [{"category": "blocking", "text": "add pricing", "status": "open"}],
+        }
+        assert route_after_reviewer(state) == "researcher"
+
 
 class TestReviewLoopIntegration:
     """Compose the review loop (researcher -> writer -> reviewer) from fake
@@ -340,3 +363,146 @@ class TestReviewLoopIntegration:
         assert final["review_items"] == []
         # No ballooning: the revised draft only appends the documented gap.
         assert len(final["draft_report"]) <= len(self.FIRST_DRAFT) + 200
+
+    def test_budget_capped_with_open_items_ends_at_revision_limit(self):
+        """A persistently open item that never exhausts and never resolves is
+        capped by the revision budget: three REVISE audits, each followed by
+        a writer pass that honestly documents its attempt, then the loop
+        stops at revision_count == MAX_REVISIONS with the REVISE verdict and
+        the open item retained in the end state."""
+        from ora.agents.supervisor import MAX_REVISIONS
+
+        calls = {"researcher": 0, "writer": 0, "reviewer": 0}
+        item_text = "Find a 2026 market forecast"
+
+        def researcher(state):
+            calls["researcher"] += 1
+            if calls["researcher"] == 1:
+                return {"findings": [Finding(claim="initial claim")]}
+            # One fresh query per pass, zero yield; the item is never
+            # exhausted (only 1 attempt) and never resolved.
+            return {
+                "review_items": [{"category": "blocking", "text": item_text, "status": "open"}],
+                "last_round_new_sources": 0,
+                "last_round_new_findings": 0,
+            }
+
+        def writer(state):
+            calls["writer"] += 1
+            if calls["writer"] == 1:
+                return {"draft_report": self.FIRST_DRAFT}
+            # Every revision honestly records the attempt in a "Changes made"
+            # block (mirrors the real writer keeping dispositions in the body).
+            return {
+                "draft_report": (
+                    self.FIRST_DRAFT
+                    + "\n## Changes made\n"
+                    + f"- [blocking] {item_text}: attempted, no public data found.\n"
+                ),
+                "writer_change_notes": (
+                    "## Changes made\n"
+                    + f"- [blocking] {item_text}: attempted, no public data found.\n"
+                ),
+            }
+
+        reviewer = self._reviewer_fake(
+            calls,
+            [
+                (
+                    ReviewVerdict(verdict="REVISE", blocking=[item_text]),
+                    [{"category": "blocking", "text": item_text, "status": "open"}],
+                ),
+                (
+                    ReviewVerdict(verdict="REVISE", blocking=[item_text]),
+                    [{"category": "blocking", "text": item_text, "status": "open"}],
+                ),
+                (
+                    ReviewVerdict(verdict="REVISE", blocking=[item_text]),
+                    [{"category": "blocking", "text": item_text, "status": "open"}],
+                ),
+            ],
+        )
+
+        graph = self._build_loop(researcher, writer, reviewer)
+        final = graph.invoke({"query": "test query", "intensity": 3, "revision_count": 0})
+
+        assert calls["reviewer"] == MAX_REVISIONS
+        assert calls["researcher"] == MAX_REVISIONS
+        assert calls["writer"] == MAX_REVISIONS
+        assert final["revision_count"] == MAX_REVISIONS
+        # Capped on REVISE, not silently PASSed: the open item and the
+        # REVISE verdict survive so the CLI can surface the unresolved end.
+        assert final["review_verdict"].verdict == "REVISE"
+        assert final["review_items"] == [
+            {"category": "blocking", "text": item_text, "status": "open"}
+        ]
+        # The last writer pass left an honest disposition block in the draft.
+        assert "## Changes made" in final["draft_report"]
+        assert item_text in final["draft_report"]
+
+    def test_final_audit_new_issue_retained_in_end_state(self):
+        """A NEW issue raised on the final (budget-capped) audit cannot get a
+        researcher pass, but it must survive in the end state (REVISE verdict
+        + the new open item) so the CLI warning path can surface it."""
+        from ora.agents.supervisor import MAX_REVISIONS
+
+        calls = {"researcher": 0, "writer": 0, "reviewer": 0}
+        old_item = "Find a 2026 market forecast"
+        new_item = "Fabricated statistic on line 12 contradicts its cited source"
+
+        def researcher(state):
+            calls["researcher"] += 1
+            if calls["researcher"] == 1:
+                return {"findings": [Finding(claim="initial claim")]}
+            return {
+                "review_items": [{"category": "blocking", "text": old_item, "status": "open"}],
+                "last_round_new_sources": 0,
+                "last_round_new_findings": 0,
+            }
+
+        def writer(state):
+            calls["writer"] += 1
+            if calls["writer"] == 1:
+                return {"draft_report": self.FIRST_DRAFT}
+            return {
+                "draft_report": (
+                    self.FIRST_DRAFT
+                    + "\n## Changes made\n"
+                    + f"- [blocking] {old_item}: attempted, no public data found.\n"
+                ),
+                "writer_change_notes": (
+                    "## Changes made\n"
+                    + f"- [blocking] {old_item}: attempted, no public data found.\n"
+                ),
+            }
+
+        reviewer = self._reviewer_fake(
+            calls,
+            [
+                (
+                    ReviewVerdict(verdict="REVISE", blocking=[old_item]),
+                    [{"category": "blocking", "text": old_item, "status": "open"}],
+                ),
+                (
+                    ReviewVerdict(verdict="REVISE", blocking=[old_item]),
+                    [{"category": "blocking", "text": old_item, "status": "open"}],
+                ),
+                # Audit 3 (final): reviewer spots a NEW material flaw.
+                (
+                    ReviewVerdict(verdict="REVISE", blocking=[new_item]),
+                    [{"category": "blocking", "text": new_item, "status": "open"}],
+                ),
+            ],
+        )
+
+        graph = self._build_loop(researcher, writer, reviewer)
+        final = graph.invoke({"query": "test query", "intensity": 3, "revision_count": 0})
+
+        assert calls["reviewer"] == MAX_REVISIONS
+        assert final["revision_count"] == MAX_REVISIONS
+        assert final["review_verdict"].verdict == "REVISE"
+        assert final["review_verdict"].blocking == [new_item]
+        # New issue item is retained as an open review_item in the end state.
+        assert final["review_items"] == [
+            {"category": "blocking", "text": new_item, "status": "open"}
+        ]

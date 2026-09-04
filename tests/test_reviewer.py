@@ -284,7 +284,7 @@ class TestReviewerNodeRevisionAudit:
 
     def test_first_audit_defaults_context_placeholders(self, monkeypatch):
         """A first audit (no review_items/notes/deltas) renders the context
-        placeholders with their default values."""
+        placeholders with their default values and audit_number 1."""
         from ora.agents import reviewer as reviewer_module
         from ora.agents.reviewer import reviewer_node
 
@@ -301,3 +301,48 @@ class TestReviewerNodeRevisionAudit:
         assert "(first audit)" in prompt
         assert "(no revision notes)" in prompt
         assert "NEW_SOURCES_SINCE_LAST_AUDIT: 0" in prompt
+        # Audit position context and the final-audit rule text are present.
+        assert "AUDIT_NUMBER: 1" in prompt
+        assert "MAX_AUDITS: 3" in prompt
+        assert "FINAL audit" in prompt
+        assert "material flaws" in prompt
+        assert "Inverse rule" in prompt
+
+    def test_final_audit_renders_audit_number_at_max(self, monkeypatch):
+        """A re-audit at revision_count == MAX_REVISIONS - 1 is the FINAL
+        audit: the prompt must render AUDIT_NUMBER equal to MAX_AUDITS so the
+        reviewer knows no researcher pass will follow a REVISE."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        llm = _AuditRecordingLLM([PASS_WITH_GAPS_JSON])
+        monkeypatch.setattr(
+            reviewer_module,
+            "get_llm",
+            lambda model_name, temperature=0.2: llm,
+        )
+
+        reviewer_node(self._audit_state(revision_count=2))
+
+        prompt = llm.prompts[-1]
+        assert "AUDIT_NUMBER: 3" in prompt
+        assert "MAX_AUDITS: 3" in prompt
+
+    def test_non_final_audit_renders_audit_number_below_max(self, monkeypatch):
+        """A second audit (revision_count 1) renders AUDIT_NUMBER 2 of 3."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        llm = _AuditRecordingLLM([PASS_WITH_GAPS_JSON])
+        monkeypatch.setattr(
+            reviewer_module,
+            "get_llm",
+            lambda model_name, temperature=0.2: llm,
+        )
+
+        reviewer_node(self._audit_state(revision_count=1))
+
+        prompt = llm.prompts[-1]
+        assert "AUDIT_NUMBER: 2" in prompt
+        assert "MAX_AUDITS: 3" in prompt
+        assert "AUDIT_NUMBER: 3" not in prompt

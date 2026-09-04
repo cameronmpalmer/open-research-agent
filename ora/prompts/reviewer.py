@@ -26,6 +26,8 @@ If sources disagree, is this documented with both positions?
 Does the report address all aspects of the query?
 
 ## Revision Audit Context
+AUDIT_NUMBER: {audit_number}
+MAX_AUDITS: {max_audits}
 PREVIOUS_ITEMS_AND_STATUS: {review_items}
 WRITER_CHANGE_NOTES: {writer_change_notes}
 NEW_SOURCES_SINCE_LAST_AUDIT: {new_sources_count}
@@ -36,7 +38,10 @@ When PREVIOUS_ITEMS_AND_STATUS is not "(first audit)", this is a RE-AUDIT of a r
 - **Addressed**: the writer's disposition claims the item was resolved AND the report actually reflects the change. Do NOT re-raise it.
 - **Evidence exhausted and honestly documented**: the item was already marked evidence_exhausted in the previous audit AND the writer documented the limitation honestly in the report. ACCEPT it as an unresolvable gap. Do NOT REVISE for it, even if the writer's disposition says it was only partially addressed or documented as a gap. List it in "unresolvable_gaps".
 - **Actionable and unaddressed**: an open item was not addressed, or the disposition claims it resolved but the report does not reflect it. REVISE and list it under "blocking" or "required" with the specific miss.
-- You may still raise NEW issues (blocking/required/suggested).
+- **Exhausted but not documented**: an evidence_exhausted item whose limitation the report does NOT document is still actionable (a documentation gap). You may REVISE for it.
+- **Inverse rule**: if every previous item is addressed or accepted AND no material new issues exist, return PASS.
+- **Final audit**: if AUDIT_NUMBER == MAX_AUDITS, this is the FINAL audit: no further researcher pass will follow. Residual concerns about items that were addressed or accepted must NOT trigger REVISE. Fold anything left into "unresolvable_gaps" and return PASS.
+- **New issues are limited to material flaws**: you may still raise NEW blocking/required issues, but only for material flaws (factual errors, fabricated content, contradictions with sources), not preference-level gaps, especially on later audits.
 
 Read dispositions from WRITER_CHANGE_NOTES, but treat them as CLAIMS TO VERIFY against the report, not as truth. Never REVISE solely for items that were evidence_exhausted in the previous audit when the report documents them.
 
