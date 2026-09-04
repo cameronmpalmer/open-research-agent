@@ -241,6 +241,33 @@ def _format_reviewer_feedback(state: ResearchState) -> str:
     return "\n\n".join(parts)
 
 
+def _parse_query_lines(text: str, limit: int | None = None) -> list[str]:
+    """Parse one-query-per-line LLM output into a query list.
+
+    Uses regex markers so content that starts with digits or hyphens
+    survives: strips "1. ", "1) ", "- ", and "* " list markers only, not
+    content-leading digits (e.g. a year) or content hyphens (e.g. "-1
+    penalty"). When limit is given, returns at most that many queries
+    (matching the slicing generate_gap_queries_dynamic applied after
+    parsing).
+    """
+    queries = []
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Strip "1. " and "1) " numbering prefixes only (not bare digits).
+        line = re.sub(r"^\d+[\.\)]\s*", "", line)
+        # Strip bullet markers "- " and "* " only when not followed by a
+        # digit, so "-1 penalty" is preserved but "- something" is stripped.
+        line = re.sub(r"^[-*]\s+(?!\d)", "", line)
+        if line:
+            queries.append(line)
+    if limit is not None:
+        return queries[:limit]
+    return queries
+
+
 def generate_gap_queries_dynamic(
     query: str,
     intensity: int,
@@ -295,19 +322,9 @@ def generate_gap_queries_dynamic(
         emit_progress(config, "Researcher: gap query LLM failed, using templates", kind="warning")
         return generate_gap_queries(query, intensity)
 
-    # Parse: one query per line, strip numbering and bullets.
-    queries = []
-    for line in text.strip().split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        # Strip "1. ", "1) " prefixes only (not content hyphens).
-        line = re.sub(r"^\d+[\.\)]\s*", "", line)
-        # Strip bullet markers like "- " and "* " only when followed by non-digit,
-        # so "-1 penalty" is preserved but "- something" is stripped.
-        line = re.sub(r"^[-*]\s+(?!\d)", "", line)
-        if line:
-            queries.append(line)
+    # Parse: one query per line, strip list markers. Shared helper so the
+    # flat and per-item generators accept the same LLM output shapes.
+    queries = _parse_query_lines(text, limit=count)
 
     if not queries:
         emit_progress(
@@ -315,7 +332,7 @@ def generate_gap_queries_dynamic(
         )
         return generate_gap_queries(query, intensity)
 
-    return queries[:count]
+    return queries
 
 
 def _fresh(queries, executed_queries: set[str]) -> list[str]:
@@ -328,18 +345,30 @@ def generate_gap_queries_for_items(
     intensity: int,
     items: list[dict],
     executed_queries: set[str],
+    sources: list | None = None,
     config: RunnableConfig | None = None,
 ) -> list[str]:
     """Generate per-item gap queries for open review items.
 
     Falls back to generate_gap_queries_dynamic when there are no open
-    blocking/required items (first-pass behavior) or the LLM fails.
+    blocking/required items (first-pass behavior), the LLM call fails, or
+    the LLM returns no usable queries. sources (when given) give the
+    dynamic fallback real source context instead of an empty summary.
     """
+    sources = sources or []
     open_items = [i for i in items if i.get("status") == "open"]
     if not open_items or intensity < 3:
-        return generate_gap_queries_dynamic(query, intensity, [], "", executed_queries, config)
+        return generate_gap_queries_dynamic(query, intensity, sources, "", executed_queries, config)
 
     count = {3: 6, 4: 9, 5: 12}.get(intensity, 6)
+    if len(open_items) > 6:
+        # The prompt only carries the first 6 items, so exhaustion decisions
+        # over larger item sets are visible in the progress stream.
+        emit_progress(
+            config,
+            f"Researcher: {len(open_items)} open review items, generating queries for the first 6",
+            kind="warning",
+        )
     item_lines = "\n".join(f"- [{i['category']}] {i['text']}" for i in open_items[:6])
     executed_sorted = sorted(executed_queries)
     already_run = "\n".join(f"- {q}" for q in executed_sorted[-30:]) or "(none yet)"
@@ -349,6 +378,7 @@ def generate_gap_queries_for_items(
         llm = get_llm(get_researcher_model(settings), temperature=0.8)
         response = llm.invoke(
             ITEM_GAP_QUERY_PROMPT.format(
+                query=query,
                 review_items=item_lines,
                 already_run=already_run,
                 count=count,
@@ -359,13 +389,19 @@ def generate_gap_queries_for_items(
         emit_progress(
             config, "Researcher: item gap query LLM failed, using defaults", kind="warning"
         )
-        return generate_gap_queries_dynamic(query, intensity, [], "", executed_queries, config)
+        return generate_gap_queries_dynamic(query, intensity, sources, "", executed_queries, config)
 
     queries = []
-    for line in text.strip().split("\n"):
-        line = line.strip().lstrip("-*0123456789. ")  # mirrors existing parse tolerance
-        if line and len(line) > 4 and line not in queries:
-            queries.append(line)
+    for parsed in _parse_query_lines(text, limit=count):
+        if len(parsed) > 4 and parsed not in queries:
+            queries.append(parsed)
+    if not queries:
+        emit_progress(
+            config,
+            "Researcher: item gap query LLM returned no usable queries, using defaults",
+            kind="warning",
+        )
+        return generate_gap_queries_dynamic(query, intensity, sources, "", executed_queries, config)
     return _fresh(queries, executed_queries)
 
 
@@ -553,6 +589,30 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
     # them or exhausts them below.
     open_items = [i for i in state.get("review_items") or [] if i.get("status") == "open"]
 
+    def round_gap_queries() -> list[str]:
+        """Gap-query source for the current round, shared by the round-gap
+        branch and the duplicate-regeneration branch so both call identical
+        fallback logic: per-item generation when structured open review items
+        exist (its own fallbacks carry the same sources context), otherwise
+        the flat dynamic generator with prose reviewer feedback."""
+        if open_items:
+            return generate_gap_queries_for_items(
+                query=query,
+                intensity=intensity,
+                items=open_items,
+                executed_queries=executed_q_set,
+                sources=sources,
+                config=config,
+            )
+        return generate_gap_queries_dynamic(
+            query=query,
+            intensity=intensity,
+            sources=sources,
+            reviewer_feedback=reviewer_feedback,
+            executed_queries=executed_q_set,
+            config=config,
+        )
+
     # Baseline for this pass's deltas. sources/findings are appended to in
     # place by _scrape_and_collect inside the loop, so lengths captured here
     # (before the loop) are the correct baseline for the counts returned as
@@ -560,11 +620,10 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
     start_sources = len(sources)
     start_findings = len(findings)
 
-    # Queries actually searched this pass (not merely generated). On a revise
-    # pass where min_sources is already met the round typically breaks after
-    # ONE search (_scrape_and_collect returns True and ends the query loop),
-    # so the exhaustion rule below requires >= 2 of these before it will mark
-    # open items evidence_exhausted.
+    # Queries actually searched this pass (not merely generated); a failed
+    # search still counts as an attempt. The exhaustion rule below requires
+    # >= 2 attempts before marking open items evidence_exhausted, so items
+    # are never exhausted on a single unlucky search.
     pass_executed_queries: list[str] = []
 
     round_num = 0
@@ -584,27 +643,10 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             else:
                 queries_for_round = list(generate_search_queries(query, intensity))
         else:
-            # Dynamic gap queries using LLM: adapt to what's been found and
-            # what the reviewer flagged. Falls back to templates on failure.
-            # With structured open review items, target each item instead;
-            # the no-items path stays exactly the original dynamic call.
-            if open_items:
-                queries_for_round = generate_gap_queries_for_items(
-                    query=query,
-                    intensity=intensity,
-                    items=open_items,
-                    executed_queries=executed_q_set,
-                    config=config,
-                )
-            else:
-                queries_for_round = generate_gap_queries_dynamic(
-                    query=query,
-                    intensity=intensity,
-                    sources=sources,
-                    reviewer_feedback=reviewer_feedback,
-                    executed_queries=executed_q_set,
-                    config=config,
-                )
+            # Gap queries: adapt to what's been found and what the reviewer
+            # flagged. Falls back to templates on failure. With structured
+            # open review items, target each item instead (see round_gap_queries).
+            queries_for_round = round_gap_queries()
 
         # Filter out queries already executed in any prior invocation.
         fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
@@ -616,23 +658,7 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
                 "Researcher: all gap queries were duplicates, regenerating...",
                 kind="warning",
             )
-            if open_items:
-                queries_for_round = generate_gap_queries_for_items(
-                    query=query,
-                    intensity=intensity,
-                    items=open_items,
-                    executed_queries=executed_q_set,
-                    config=config,
-                )
-            else:
-                queries_for_round = generate_gap_queries_dynamic(
-                    query=query,
-                    intensity=intensity,
-                    sources=sources,
-                    reviewer_feedback=reviewer_feedback,
-                    executed_queries=executed_q_set,
-                    config=config,
-                )
+            queries_for_round = round_gap_queries()
             fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
             if not fresh_queries:
                 if revise_round and open_items:
@@ -667,13 +693,24 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             kind="search",
         )
 
-        for q in fresh_queries:
+        # On a revise round with open items where min_sources is already met,
+        # do NOT end the round after the first query: _scrape_and_collect
+        # returns True immediately at min_sources, which would otherwise give
+        # the open items only a single-query "attempt" per pass. Search up to
+        # three fresh queries instead so a genuine multi-query attempt happens
+        # within one pass (the exhaustion rule below requires >= 2 executed
+        # searches). Rounds still chasing min_sources keep the old behavior
+        # of searching every fresh query.
+        multi_query_revise = bool(revise_round and open_items and len(sources) >= min_sources)
+        round_queries = fresh_queries if not multi_query_revise else fresh_queries[:3]
+        for q in round_queries:
             if len(sources) >= min_sources and not revise_round:
                 break
 
             executed_q_set.add(q)
-            # Count only queries that are actually searched this pass; the
-            # early-return above means some fresh queries are never reached.
+            # Count only queries that are actually searched this pass. A
+            # failed search still counts: it is a genuine (if unproductive)
+            # attempt toward the open items.
             pass_executed_queries.append(q)
             log.append(f"Search: {q}")
             emit_progress(config, f'Researcher: searching "{q}"', kind="search")
@@ -708,7 +745,7 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
                 kind="info" if search_failed else "success",
             )
 
-            if _scrape_and_collect(
+            scrape_done = _scrape_and_collect(
                 urls,
                 params,
                 max_content_chars,
@@ -723,13 +760,14 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
                 intensity=intensity,
                 model_name=model_name,
                 force_scrape=revise_round,
-            ):
+            )
+            if scrape_done and not multi_query_revise:
                 # force_scrape suppresses _scrape_and_collect's internal
                 # early-return at min_sources, so all eligible URLs for this
-                # query are scraped. The function returns True because
-                # min_sources is already met, which breaks the query loop.
-                # On a REVISE round only the first query is processed;
-                # the reviewer can issue another REVISE (up to 3) if gaps remain.
+                # query are scraped. Its True return still ends the query
+                # loop on ordinary rounds; multi-query revise rounds keep
+                # searching up to the 3-query cap so open items get a
+                # genuine attempt.
                 break
 
         if revise_round:
@@ -737,16 +775,19 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
 
     # Exhaustion rule: mark open items evidence_exhausted only when this was
     # a review-driven revise pass, open items exist, the WHOLE pass produced
-    # zero new sources, AND at least two queries were actually searched. The
-    # two-query floor matters because on a revise pass where min_sources is
-    # already met the inner query loop usually breaks after ONE search (the
-    # first _scrape_and_collect returns True and ends the round); exhausting
-    # on a single unlucky search would close genuinely addressable items.
-    # Fewer than two searches leaves items open so genuine attempts can
-    # accumulate across REVISE passes. NOTE for the Task 4 routing guard:
-    # route REVISE back to the researcher while open items remain and budget
-    # remains, even on zero-progress passes, so multi-pass attempts can
-    # accumulate before any item is judged exhausted.
+    # zero new sources, AND at least two queries were actually searched. On a
+    # revise round where min_sources is already met the query loop now runs
+    # up to three searches (multi_query_revise above), so two zero-yield
+    # searches are a genuine multi-query attempt; one search (or zero after
+    # regeneration) leaves items open so attempts can accumulate across
+    # REVISE passes. NOTE for the amended Task 4 routing contract: REVISE
+    # routes back to the researcher iff revision_count < 3 AND at least one
+    # open (non-exhausted) review item remains, otherwise the graph ends;
+    # zero-progress passes still route back while an open item remains.
+    # NOTE for the Task 4 reviewer re-audit: review_items_from_verdict maps
+    # any repeated gap back to status "open", so the reviewer must treat
+    # items the researcher already marked evidence_exhausted distinctly (an
+    # acceptable documented gap) instead of REVISE-ing them anew.
     # Attribution is intentionally coarse (whole-pass, not per-item): gap
     # queries are generated per item, but scraped evidence is collected into
     # one shared pool, so a source cannot be reliably assigned to the item

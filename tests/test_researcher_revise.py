@@ -1,10 +1,11 @@
 """Tests for per-item gap queries and evidence exhaustion in the researcher.
 
-Covers generate_gap_queries_for_items (dedup, no-open-items fallback, LLM
-failure fallback) and researcher_node revise-pass behavior: whole-pass
+Covers generate_gap_queries_for_items (dedup, shared parser preservation,
+no-open-items/LLM-failure fallbacks) and researcher_node revise-pass
+behavior: min-met revise rounds search up to three fresh queries; whole-pass
 zero-new-sources marks open items evidence_exhausted only after a genuine
 multi-query attempt (>= 2 queries searched); single-query rounds keep items
-open; progress keeps them open.
+open; progress keeps them open; failed searches still count as attempts.
 """
 
 import types
@@ -90,6 +91,26 @@ class TestGenerateGapQueriesForItems:
         assert "industry outlook report for 2026" in result
         assert "already executed query" not in result
         assert len(result) == len(set(result))
+
+    def test_parse_preserves_content_leading_digits_and_parenthesis(self, monkeypatch):
+        """The shared parser strips list markers but keeps content-leading
+        digits (e.g. a year) and strips '1)' numbering to its content."""
+        monkeypatch.setattr(
+            "ora.agents.researcher.get_llm",
+            lambda *a, **kw: _FakeLLM(
+                "2026 outlook for the AI market\n1) enterprise pricing\n- supplier cost breakdown\n"
+            ),
+        )
+        result = generate_gap_queries_for_items(
+            query="test query",
+            intensity=3,
+            items=OPEN_ITEMS,
+            executed_queries=set(),
+            config=None,
+        )
+        assert "2026 outlook for the AI market" in result
+        assert "enterprise pricing" in result
+        assert "supplier cost breakdown" in result
 
     def test_falls_back_to_dynamic_when_no_open_items(self, monkeypatch):
         """With no open items the helper delegates to the flat dynamic
@@ -195,16 +216,17 @@ class TestResearcherNodeExhaustion:
         assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
 
     def test_revise_single_query_round_keeps_items_open(self, monkeypatch):
-        """Regression guard: when min_sources is already met, the forced
-        revise round executes only ONE query before breaking, so a zero-yield
-        single search must NOT exhaust the open items (they were never
-        genuinely attempted; a future REVISE pass should try other variants)."""
+        """Regression guard: even with multi-query revise semantics, a round
+        that has only ONE fresh query searches just that query (the cap is
+        min(len(fresh_queries), 3)), so a zero-yield single search must NOT
+        exhaust the open items (fewer than two attempts this pass; a future
+        REVISE pass should try other variants)."""
         state = _revise_state(
             search_queries=["fresh query one"],
             executed_queries=[],
         )
-        # The single fresh query yields no candidate URLs; min_sources is met
-        # so _scrape_and_collect returns True and the round breaks after it.
+        # The single fresh query yields no candidate URLs; with only one
+        # executed query the >= 2 exhaustion floor is not reached.
         monkeypatch.setattr(
             "ora.tools.search.web_search",
             _FakeTool("No results matched your search."),
@@ -215,6 +237,45 @@ class TestResearcherNodeExhaustion:
         assert result["last_round_new_sources"] == 0
         assert result["review_items"]
         assert all(item["status"] == "open" for item in result["review_items"])
+
+    def test_revise_two_zero_yield_queries_with_min_met_marks_exhausted(self, monkeypatch):
+        """A min-met revise round with TWO fresh zero-yield queries runs both
+        (multi-query revise semantics), reaches the >= 2 floor, and exhausts
+        the open items in one pass."""
+        state = _revise_state(
+            search_queries=["fresh query one", "fresh query two"],
+            executed_queries=[],
+        )
+        monkeypatch.setattr(
+            "ora.tools.search.web_search",
+            _FakeTool("No results matched your search."),
+        )
+
+        result = researcher_node(state)
+
+        assert result["last_round_new_sources"] == 0
+        assert result["review_items"]
+        assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
+
+    def test_revise_search_failures_count_as_attempts(self, monkeypatch):
+        """A failed search is still a genuine attempt: two failed searches on
+        a min-met revise round with open items reach the >= 2 floor and
+        exhaust the items (zero new sources)."""
+        state = _revise_state(
+            search_queries=["fresh query one", "fresh query two"],
+            executed_queries=[],
+        )
+        # Both searches fail at the tool level (no candidate URLs either).
+        monkeypatch.setattr(
+            "ora.tools.search.web_search",
+            _FakeTool("Search error: rate limited"),
+        )
+
+        result = researcher_node(state)
+
+        assert result["last_round_new_sources"] == 0
+        assert result["review_items"]
+        assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
 
     def test_revise_duplicate_regeneration_breaks_without_templates(self, monkeypatch):
         """When even per-item regeneration only repeats executed queries, the

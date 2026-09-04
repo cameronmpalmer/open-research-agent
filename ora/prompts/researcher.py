@@ -45,6 +45,8 @@ ITEM_GAP_QUERY_PROMPT = """You are a research query strategist closing specific 
 adversarial reviewer. For EACH review item below, produce query variants that
 would surface evidence directly about that item.
 
+Original research question: {query}
+
 Review items:
 {review_items}
 
