@@ -7,7 +7,7 @@ from langchain_core.runnables import RunnableConfig
 
 from ora.config import get_llm, get_researcher_model, load_config
 from ora.progress import emit_progress
-from ora.prompts import WRITER_PROMPT
+from ora.prompts import REVISION_PROMPT, WRITER_PROMPT
 from ora.state import ResearchState
 
 
@@ -78,6 +78,125 @@ def _format_findings_for_prompt(findings: list) -> str:
     return "\n".join(lines)
 
 
+# Programmatic section markers emitted by _build_source_table and
+# _build_bibliography. The LLM body never legitimately contains them
+# (WRITER_PROMPT/REVISION_PROMPT forbid generating them), so the first
+# occurrence in a full report marks the start of the programmatic tail.
+_SOURCE_TABLE_MARKER = "## Source Table"
+_BIBLIOGRAPHY_MARKER = "## Bibliography"
+_CHANGES_MADE_MARKER = "Changes made"
+
+# Sections that are (re)built programmatically rather than written by the
+# LLM. In revision mode the previous draft is passed to the LLM as revision
+# context (body plus programmatic tail, so items about specific citations
+# can be addressed) but any programmatic sections the response echoes back
+# are stripped during assembly and rebuilt fresh from the current sources.
+_PROGRAMMATIC_START_MARKERS = (_SOURCE_TABLE_MARKER, _BIBLIOGRAPHY_MARKER)
+
+
+def _find_changes_made_marker(text: str) -> int:
+    """Return the index of a 'Changes made' section heading, or -1.
+
+    Matches the marker as its own heading line ("Changes made" optionally
+    prefixed by markdown heading markers) so prose that merely contains the
+    words "changes made" is not truncated.
+    """
+    if not text:
+        return -1
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip("#").strip()
+        if stripped.lower() == _CHANGES_MADE_MARKER.lower():
+            return offset
+        offset += len(line)
+    return -1
+
+
+def _extract_change_notes(body: str) -> str:
+    """Return the writer's 'Changes made' section from an LLM body.
+
+    Finds the section starting at the 'Changes made' marker (heading style
+    agnostic) and returns the text from that marker to the end of the body
+    (or to the next programmatic section, when the response echoes the full
+    assembled report). Returns "" when the marker is absent.
+    """
+    if not body:
+        return ""
+    idx = _find_changes_made_marker(body)
+    if idx == -1:
+        return ""
+    end = len(body)
+    for marker in _PROGRAMMATIC_START_MARKERS:
+        m_idx = body.find(marker, idx)
+        if m_idx != -1:
+            end = m_idx
+            break
+    return body[idx:end].strip()
+
+
+def _strip_previous_change_notes(previous_draft: str) -> str:
+    """Drop a prior 'Changes made' disposition block from the previous draft.
+
+    A previous revision's assembled draft may contain a "Changes made"
+    block (written by the LLM body). It must not be fed back as context for
+    the next revision: each revision writes a fresh block for the current
+    items, and stale dispositions would stack. Only the block itself is cut
+    (from the marker to the start of the next section); the body and the
+    source table/bibliography context stay for the LLM to reference.
+    """
+    marker_idx = _find_changes_made_marker(previous_draft)
+    if marker_idx == -1:
+        return previous_draft
+    end = len(previous_draft)
+    for marker in _PROGRAMMATIC_START_MARKERS:
+        idx = previous_draft.find(marker, marker_idx)
+        if idx != -1:
+            end = idx
+            break
+    return previous_draft[:marker_idx].rstrip() + "\n" + previous_draft[end:]
+
+
+def _strip_programmatic_sections(report: str) -> str:
+    """Remove the assembled programmatic sections from a full report.
+
+    Removes the programmatic header (the "# Research: ..." line plus the
+    "**Intensity:** ..." metadata line) and cuts at the first programmatic
+    section marker ("## Source Table" / "## Bibliography"). Markdown headings
+    inside the LLM body (including a "Changes made" disposition block) are
+    left untouched. Used when assembling so that programmatic sections the
+    LLM echoes back in revision mode are discarded in favor of fresh ones.
+    """
+    if not report:
+        return ""
+    body = report
+    for marker in _PROGRAMMATIC_START_MARKERS:
+        idx = body.find(marker)
+        if idx != -1:
+            body = body[:idx]
+            break
+    lines = body.splitlines()
+    # Drop only the assembled header lines ("# Research: ..." and the
+    # "**Intensity:** ..." metadata line) when present.
+    if lines and lines[0].startswith("# Research:"):
+        lines.pop(0)
+        if lines and lines[0].startswith("**Intensity:"):
+            lines.pop(0)
+    return "\n".join(lines).strip()
+
+
+def _assemble_draft(header: str, llm_body: str, sources: list) -> str:
+    """Assemble the final report from programmatic sections + LLM body.
+
+    The LLM body may still contain programmatic sections if a revision-mode
+    response echoed the previous draft; strip them so the source table and
+    bibliography are always rebuilt fresh from the current sources.
+    """
+    body = _strip_programmatic_sections(llm_body) or llm_body.strip()
+    source_table = _build_source_table(sources)
+    bibliography = _build_bibliography(sources)
+    return header + "\n" + body + "\n" + source_table + "\n" + bibliography
+
+
 def _build_header(query: str, intensity: int, num_sources: int) -> str:
     """Build the report header with programmatic source count."""
     today = date.today().strftime("%Y-%m-%d")
@@ -123,9 +242,16 @@ def _build_bibliography(sources: list) -> str:
 def writer_node(state: ResearchState, config: RunnableConfig | None = None) -> dict[str, Any]:
     """Writer LangGraph node. Synthesizes findings into a structured report.
 
-    The header (source count), source table, and bibliography are generated
-    programmatically to ensure completeness. The LLM handles the Executive
-    Summary, Key Findings, and Evidence Gaps sections.
+    First pass: the LLM writes the report body from the findings and the
+    header (source count), source table, and bibliography are generated
+    programmatically to ensure completeness.
+
+    Revision mode (state has review_items from a REVISE verdict and a
+    previous draft_report): the LLM receives the review items with statuses,
+    only the new findings/sources since the last audit, and the previous
+    draft's LLM-written body, and revises surgically. Programmatic sections
+    are always rebuilt fresh from the current sources. The returned
+    writer_change_notes carries the LLM's per-item disposition.
     """
     settings = load_config()
     model_name = get_researcher_model(settings)
@@ -146,11 +272,44 @@ def writer_node(state: ResearchState, config: RunnableConfig | None = None) -> d
     )
     findings_text = _format_findings_for_prompt(findings_raw)
 
-    prompt_text = WRITER_PROMPT.format(
-        query=query,
-        findings=findings_text,
-        num_findings=num_findings,
-    )
+    review_items = state.get("review_items") or []
+    previous_draft = state.get("draft_report", "")
+
+    if review_items and previous_draft:
+        # Revision pass: surgical rewrite of the previous draft. The previous
+        # draft (body plus its source table/bibliography context, so items
+        # about specific citations can be addressed) is shown to the LLM; any
+        # prior pass's "Changes made" block is dropped so the fresh block is
+        # written for the current items. Only the new findings/sources from
+        # the pass just audited count as new evidence. Programmatic sections
+        # of the OUTPUT are always rebuilt fresh below from the current
+        # sources.
+        revision_mode = True
+        revision_context = _strip_previous_change_notes(previous_draft)
+        items_text = "\n".join(
+            f"- [{i.get('category', 'required')}] ({i.get('status', 'open')}) {i.get('text', '')}"
+            for i in review_items
+        )
+        new_findings_count = state.get("last_round_new_findings", 0)
+        if new_findings_count:
+            new_evidence_text = _format_findings_for_prompt(findings_raw[-new_findings_count:])
+        else:
+            new_evidence_text = "(none)"
+        prompt_text = REVISION_PROMPT.format(
+            query=query,
+            review_items=items_text or "(no open items)",
+            new_evidence=new_evidence_text,
+            previous_draft=revision_context,
+        )
+    else:
+        # First pass (or a draft-less continuation): write the body from all
+        # findings as before.
+        revision_mode = False
+        prompt_text = WRITER_PROMPT.format(
+            query=query,
+            findings=findings_text,
+            num_findings=num_findings,
+        )
 
     try:
         response = llm.invoke(prompt_text)
@@ -159,16 +318,25 @@ def writer_node(state: ResearchState, config: RunnableConfig | None = None) -> d
         raise
     llm_body = response.content if hasattr(response, "content") else str(response)
 
-    # Assemble the final report: header + LLM body + programmatic sections
+    # Capture the LLM's "Changes made" disposition (revision mode) before any
+    # programmatic-section stripping below discards the end of the response.
+    change_notes = _extract_change_notes(llm_body) if revision_mode else ""
+
+    # Assemble the final report: header + LLM body + programmatic sections.
+    # The header/source table/bibliography are always rebuilt fresh from the
+    # current sources so a revision never carries forward stale sections.
     header = _build_header(query, intensity, len(sources_raw))
-    source_table = _build_source_table(sources_raw)
-    bibliography = _build_bibliography(sources_raw)
+    draft_report = _assemble_draft(header, llm_body, sources_raw)
 
-    draft_report = header + "\n" + llm_body + "\n" + source_table + "\n" + bibliography
-
-    emit_progress(config, f"Writer: draft generated, {len(draft_report)} chars", kind="success")
+    mode_label = " (revision)" if revision_mode else ""
+    emit_progress(
+        config,
+        f"Writer: draft generated, {len(draft_report)} chars{mode_label}",
+        kind="success",
+    )
 
     return {
         "draft_report": draft_report,
+        "writer_change_notes": change_notes,
         "messages": [draft_report],
     }

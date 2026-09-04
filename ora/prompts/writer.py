@@ -33,3 +33,34 @@ Research findings ({num_findings} total -- include all of them):
 {findings}
 
 Query: {query}"""
+
+
+REVISION_PROMPT = """You are revising an existing research report to address an
+adversarial reviewer's items. Be surgical: change only what the items require.
+
+ORIGINAL QUERY: {query}
+
+REVIEW ITEMS TO ADDRESS (status: open means required work; evidence_exhausted
+means the researcher could not find supporting evidence after genuine
+attempts - handle by documenting the limitation honestly):
+{review_items}
+
+NEW EVIDENCE SINCE THE PREVIOUS DRAFT (empty if none):
+{new_evidence}
+
+PREVIOUS DRAFT (revise this exact text; keep its header, source table, and
+bibliography intact - edit the body only):
+{previous_draft}
+
+Rules:
+1. Address every open item explicitly. Integrate new evidence where it
+   resolves an item. Fix structure, claims, and citations as the items demand.
+2. For evidence_exhausted items, do not fabricate support; add a brief,
+   honest note about the limitation where the item applies.
+3. Do NOT pad. Do not exceed roughly 125% of the previous draft's body
+   length unless new evidence genuinely requires it. Do not rewrite sections
+   untouched by any item.
+4. End your response with a section "Changes made" listing each item and its
+   disposition (resolved / partially addressed / documented as a gap), one
+   line per item.
+"""

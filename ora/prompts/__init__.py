@@ -9,7 +9,7 @@ from ora.prompts.supervisor import (
     SUPERVISOR_ROUTE_PROMPT,
     _search_query_count,
 )
-from ora.prompts.writer import WRITER_PROMPT
+from ora.prompts.writer import REVISION_PROMPT, WRITER_PROMPT
 
 __all__ = [
     "EXTRACTOR_PROMPT",
@@ -17,6 +17,7 @@ __all__ = [
     "ITEM_GAP_QUERY_PROMPT",
     "RESEARCHER_PROMPT",
     "REVIEWER_PROMPT",
+    "REVISION_PROMPT",
     "SUPERVISOR_PLAN_PROMPT",
     "SUPERVISOR_REVISE_PROMPT",
     "SUPERVISOR_ROUTE_PROMPT",
