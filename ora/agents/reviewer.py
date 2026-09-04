@@ -46,16 +46,22 @@ def parse_reviewer_output(output: str) -> ReviewVerdict:
 
 
 def review_items_from_verdict(verdict) -> list[dict]:
-    """Convert a ReviewVerdict into open review_items for the next pass.
+    """Convert a ReviewVerdict (or its dict form from a checkpoint) into open
+    review_items for the next pass.
 
     blocking and required become work items (status "open"); suggested and
     unresolvable_gaps are context only and are not routed to research.
     """
-    items = []
-    if hasattr(verdict, "blocking"):
-        items += [{"category": "blocking", "text": b, "status": "open"} for b in verdict.blocking]
-    if hasattr(verdict, "required"):
-        items += [{"category": "required", "text": r, "status": "open"} for r in verdict.required]
+    if verdict is None:
+        return []
+    if isinstance(verdict, dict):
+        blocking = verdict.get("blocking") or []
+        required = verdict.get("required") or []
+    else:
+        blocking = getattr(verdict, "blocking", None) or []
+        required = getattr(verdict, "required", None) or []
+    items = [{"category": "blocking", "text": b, "status": "open"} for b in blocking]
+    items += [{"category": "required", "text": r, "status": "open"} for r in required]
     return items
 
 
@@ -100,7 +106,9 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
         "review_verdict_raw": output,
         "revision_count": state.get("revision_count", 0) + 1,
         "review_items": review_items_from_verdict(verdict),
-        "last_round_new_sources": 0,
-        "last_round_new_findings": 0,
+        # NOTE: last_round_new_sources/findings are NOT reset here on purpose.
+        # route_after_reviewer runs immediately after this node and needs the
+        # just-audited pass's deltas to decide whether REVISE should continue.
+        # The researcher overwrites them on its next pass.
         "messages": [output],
     }

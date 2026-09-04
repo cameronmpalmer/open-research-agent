@@ -139,7 +139,7 @@ class TestReviewerNodeModelOverride:
 
 
 class TestReviewerNodeReviewItems:
-    def test_revise_verdict_populates_review_items_and_resets_deltas(self, monkeypatch):
+    def test_revise_verdict_populates_review_items_without_resetting_deltas(self, monkeypatch):
         """A REVISE verdict must surface open review_items and reset per-round deltas."""
         from ora.agents import reviewer as reviewer_module
         from ora.agents.reviewer import reviewer_node
@@ -163,5 +163,6 @@ class TestReviewerNodeReviewItems:
             {"category": "blocking", "text": "broken URL: example.com", "status": "open"},
             {"category": "required", "text": "add more sources", "status": "open"},
         ]
-        assert result["last_round_new_sources"] == 0
-        assert result["last_round_new_findings"] == 0
+        # Deltas are deliberately NOT reset here (routing reads them right
+        # after this node); the researcher owns last_round_new_*.
+        assert "last_round_new_sources" not in result
