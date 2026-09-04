@@ -32,6 +32,12 @@ PREVIOUS_ITEMS_AND_STATUS: {review_items}
 WRITER_CHANGE_NOTES: {writer_change_notes}
 NEW_SOURCES_SINCE_LAST_AUDIT: {new_sources_count}
 
+## Audit Policy
+The audit number tells you where you are in the revision budget:
+- **Audit 1** (AUDIT_NUMBER == 1): you may raise any blocking/required/suggested issues the checklist below finds.
+- **Later audits** (AUDIT_NUMBER >= 2): REVISE only for (a) items previously raised that remain genuinely unaddressed after the writer's changes, or (b) NEW factual errors, fabricated content, or contradictions with cited sources. Coverage or analysis preferences that are not errors must NOT trigger REVISE on later audits; fold them into "unresolvable_gaps" or list them under "suggested".
+- **Final audit** (AUDIT_NUMBER == MAX_AUDITS): REVISE only for a NEW critical factual error; everything else folds into "unresolvable_gaps" and you return PASS.
+
 ## Re-audit Instructions
 When PREVIOUS_ITEMS_AND_STATUS is not "(first audit)", this is a RE-AUDIT of a revised report. For EACH previous blocking/required item, determine its disposition in the updated report:
 
@@ -41,7 +47,8 @@ When PREVIOUS_ITEMS_AND_STATUS is not "(first audit)", this is a RE-AUDIT of a r
 - **Exhausted but not documented**: an evidence_exhausted item whose limitation the report does NOT document is still actionable (a documentation gap). You may REVISE for it.
 - **Inverse rule**: if every previous item is addressed or accepted AND no material new issues exist, return PASS.
 - **Final audit**: if AUDIT_NUMBER == MAX_AUDITS, this is the FINAL audit: no further researcher pass will follow. Residual concerns about items that were addressed or accepted must NOT trigger REVISE. Fold anything left into "unresolvable_gaps" and return PASS.
-- **New issues are limited to material flaws**: you may still raise NEW blocking/required issues, but only for material flaws (factual errors, fabricated content, contradictions with sources), not preference-level gaps, especially on later audits.
+- **No repeat raises**: items previously raised and responded to (addressed, or honestly documented as exhausted) must NOT be re-raised, even rephrased. Residual concerns about them go to "unresolvable_gaps".
+- **New issues are scoped by the Audit Policy above**: a NEW blocking/required issue on a later audit is only allowed when it is a material flaw of kind (b) (factual error, fabrication, contradiction with a cited source); preference and coverage gaps are never material flaws on later audits.
 
 Read dispositions from WRITER_CHANGE_NOTES, but treat them as CLAIMS TO VERIFY against the report, not as truth. Never REVISE solely for items that were evidence_exhausted in the previous audit when the report documents them.
 

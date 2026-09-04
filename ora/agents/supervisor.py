@@ -167,10 +167,14 @@ def route_after_reviewer(state: ResearchState) -> Literal["researcher", "__end__
 
     v = _verdict_value(state)
     revision_count = state.get("revision_count", 0)
+    # The routing budget is the state's max_revisions when the CLI/config
+    # wired one in; otherwise the module constant (3). Both default to 3, so
+    # a state without the key keeps the historical cap.
+    cap = state.get("max_revisions") or MAX_REVISIONS
 
     if v == "PASS":
         return "__end__"
-    elif revision_count < MAX_REVISIONS:
+    elif revision_count < cap:
         # Convergent loop: only keep revising while at least one open
         # (non-exhausted) review item remains. Zero-progress passes still
         # route back while an open item remains, letting per-item attempts

@@ -42,6 +42,16 @@ class TestLoadConfig:
             assert config.limits.default_intensity == 4
             os.unlink(f.name)
 
+    def test_yaml_limits_max_revisions_is_used(self):
+        """A YAML limits.max_revisions value must surface on the loaded
+        settings so the CLI can wire it into the research graph."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("limits:\n  max_revisions: 5\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.limits.max_revisions == 5
+            os.unlink(f.name)
+
     def test_get_researcher_model_defaults_to_default(self):
         settings = ORASettings()
         assert get_researcher_model(settings) == "deepseek-v4-flash"

@@ -66,6 +66,49 @@ def review_items_from_verdict(verdict) -> list[dict]:
     return items
 
 
+def _norm_item_text(text: str) -> str:
+    """Normalize an item text for repeat-raise comparison."""
+    return (text or "").strip().casefold()
+
+
+def _fold_repeated_exhausted(verdict: ReviewVerdict, previous_items: list[dict]) -> ReviewVerdict:
+    """Fold re-raised evidence_exhausted items out of blocking/required.
+
+    Hard guard behind the reviewer prompt's no-repeat-raise rule: when the
+    parsed verdict lists a blocking/required item whose normalized text was
+    previously marked evidence_exhausted, the item must not become a fresh
+    open work item (that would burn another revision on something already
+    accepted as a gap). Its text is moved into unresolvable_gaps instead and
+    removed from blocking/required. The verdict value itself is left alone:
+    with nothing left in blocking/required the routing guard stops the loop
+    (no open review_items), and the CLI surfaces the folded gaps.
+    """
+    if verdict is None or not previous_items:
+        return verdict
+    exhausted = {
+        _norm_item_text(i.get("text"))
+        for i in previous_items
+        if i.get("status") == "evidence_exhausted"
+    }
+    if not exhausted:
+        return verdict
+
+    folded: list[str] = []
+    kept_blocking: list[str] = []
+    kept_required: list[str] = []
+    for text in verdict.blocking or []:
+        (folded if _norm_item_text(text) in exhausted else kept_blocking).append(text)
+    for text in verdict.required or []:
+        (folded if _norm_item_text(text) in exhausted else kept_required).append(text)
+    if not folded:
+        return verdict
+
+    verdict.blocking = kept_blocking
+    verdict.required = kept_required
+    verdict.unresolvable_gaps = list(verdict.unresolvable_gaps or []) + folded
+    return verdict
+
+
 def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[str, Any]:
     """Adversarial reviewer LangGraph node.
 
@@ -78,10 +121,13 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
     writer's change notes, and the count of new sources found since the last
     audit, so the reviewer can verify the writer's claimed dispositions
     against the updated report instead of re-raising resolved items. The
-    audit number and the shared revision budget (MAX_REVISIONS) are passed
-    too, so the reviewer knows when it is at its final audit and folds
-    residual addressed/accepted concerns into unresolvable_gaps instead of
-    issuing a REVISE that the routing cap would discard.
+    audit number and the revision budget (state max_revisions when wired in,
+    else the MAX_REVISIONS constant) are passed too, so the reviewer knows
+    when it is at its final audit and folds residual addressed/accepted
+    concerns into unresolvable_gaps instead of issuing a REVISE that the
+    routing cap would discard. A hard guard folds re-raised
+    evidence_exhausted items out of blocking/required into
+    unresolvable_gaps.
     """
     from ora.progress import emit_progress
 
@@ -99,15 +145,19 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
     )
     # The audit currently being performed corresponds to the count this node
     # is about to return (revision_count is incremented below), so the prompt
-    # gets revision_count + 1 as the audit number and the shared budget as
-    # the cap. When audit_number == MAX_REVISIONS the reviewer is at its
-    # FINAL audit and must not REVISE for residual addressed/accepted items.
+    # gets revision_count + 1 as the audit number and the run's revision
+    # budget as the cap. The cap mirrors the routing budget used by
+    # route_after_reviewer (state max_revisions when wired in by the CLI,
+    # else the MAX_REVISIONS constant) so the reviewer knows when it is at
+    # its FINAL audit and must not REVISE for residual addressed/accepted
+    # items. When audit_number == cap the reviewer is at its final audit.
+    cap = state.get("max_revisions") or MAX_REVISIONS
     audit_number = state.get("revision_count", 0) + 1
     prompt_text = REVIEWER_PROMPT.format(
         query=state.get("query", ""),
         report=state.get("draft_report", ""),
         audit_number=audit_number,
-        max_audits=MAX_REVISIONS,
+        max_audits=cap,
         review_items=items_text,
         writer_change_notes=state.get("writer_change_notes", "") or "(no revision notes)",
         new_sources_count=str(state.get("last_round_new_sources", 0)),
@@ -117,6 +167,11 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
     output = response.content if hasattr(response, "content") else str(response)
 
     verdict = parse_reviewer_output(output)
+    # Hard repeat-raise guard: if the model re-raises a blocking/required
+    # item whose normalized text was already evidence_exhausted in a previous
+    # audit, fold it into unresolvable_gaps instead of letting it become a
+    # fresh open item that burns another revision round.
+    verdict = _fold_repeated_exhausted(verdict, state.get("review_items", []))
 
     v = verdict.verdict if hasattr(verdict, "verdict") else "PASS"
     if v == "REVISE":

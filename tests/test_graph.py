@@ -162,6 +162,32 @@ class TestRouting:
         }
         assert route_after_reviewer(state) == "researcher"
 
+    def test_route_after_reviewer_respects_state_budget_beyond_default(self):
+        """A state max_revisions of 5 lets the loop continue past the default
+        3-revision cap: revision_count 4 with an open item still routes."""
+        from ora.agents.supervisor import route_after_reviewer
+
+        state: ResearchState = {
+            "review_verdict": ReviewVerdict(verdict="REVISE"),
+            "revision_count": 4,
+            "max_revisions": 5,
+            "review_items": [{"category": "blocking", "text": "add pricing", "status": "open"}],
+        }
+        assert route_after_reviewer(state) == "researcher"
+
+    def test_route_after_reviewer_state_budget_caps_at_configured_value(self):
+        """The state budget is the cap: revision_count 5 with max_revisions 5
+        ends even with an open item."""
+        from ora.agents.supervisor import route_after_reviewer
+
+        state: ResearchState = {
+            "review_verdict": ReviewVerdict(verdict="REVISE"),
+            "revision_count": 5,
+            "max_revisions": 5,
+            "review_items": [{"category": "blocking", "text": "add pricing", "status": "open"}],
+        }
+        assert route_after_reviewer(state) == "__end__"
+
 
 class TestReviewLoopIntegration:
     """Compose the review loop (researcher -> writer -> reviewer) from fake

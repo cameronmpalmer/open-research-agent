@@ -647,3 +647,78 @@ class TestCLI:
         # Model overrides travel via config, not via graph state.
         assert "researcher_model" not in received_states[0]
         assert "reviewer_model" not in received_states[0]
+
+    def test_research_passes_max_revisions_flag_into_graph_state(self, monkeypatch):
+        """An explicit --max-revisions flag must reach the research graph as
+        plan_result['max_revisions'] (intensity 3+ so the cap is live)."""
+        from ora import cli as cli_module
+
+        received_states = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                received_states.append(state)
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "research",
+                "Rust vs Go",
+                "-y",
+                "--intensity",
+                "3",
+                "--max-revisions",
+                "5",
+                "--no-save",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert received_states
+        assert received_states[0]["max_revisions"] == 5
+
+    def test_research_honors_config_limits_max_revisions_when_flag_default(self, monkeypatch):
+        """When --max-revisions is left at its default (3), the configured
+        settings.limits.max_revisions value is wired into the graph state."""
+        from ora import cli as cli_module
+
+        settings = _fake_settings()
+        settings.limits = SimpleNamespace(max_revisions=5, default_intensity=2)
+        received_states = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                received_states.append(state)
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: settings)
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["research", "Rust vs Go", "-y", "--intensity", "3", "--no-save"],
+        )
+
+        assert result.exit_code == 0
+        assert received_states
+        assert received_states[0]["max_revisions"] == 5

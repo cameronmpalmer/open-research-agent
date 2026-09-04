@@ -99,6 +99,11 @@ class ResearchState(TypedDict, total=False):
     draft_report: str
     revision_count: int
 
+    # Review budget: optional run-scoped cap on writer-reviewer revision
+    # cycles, wired from the CLI --max-revisions flag / config
+    # limits.max_revisions by ora.cli.research. Absent -> MAX_REVISIONS (3).
+    max_revisions: int
+
     # Review
     review_verdict: ReviewVerdict
     review_verdict_raw: str  # JSON string for structured output parsing

@@ -274,6 +274,12 @@ def research(
     click.echo()
     research_graph = build_research_graph(intensity=intensity, no_review=no_review)
     plan_result["plan_approved"] = True
+    # Wire the revision budget into the research graph: an explicit
+    # --max-revisions flag wins; when it is left at its default the
+    # configured limits.max_revisions value is honored instead. Both default
+    # to 3, so the flag default and the config default agree.
+    effective_cap = max_revisions if max_revisions != 3 else settings.limits.max_revisions
+    plan_result["max_revisions"] = effective_cap
     # CLI model flags become run-scoped config overrides so every agent and
     # internal helper resolves them through the same config path.
     if model:
