@@ -56,6 +56,7 @@ class ReviewVerdict(BaseModel):
     suggested: list[str] = Field(default_factory=list)
     contradicting_evidence_found: list[str] = Field(default_factory=list)
     confidence_recalibrations: dict[str, str] = Field(default_factory=dict)
+    unresolvable_gaps: list[str] = Field(default_factory=list)
 
 
 class SourceExtraction(BaseModel):
@@ -101,6 +102,12 @@ class ResearchState(TypedDict, total=False):
     # Review
     review_verdict: ReviewVerdict
     review_verdict_raw: str  # JSON string for structured output parsing
+
+    # Review loop (convergent REVISE)
+    review_items: list[dict]  # [{category, text, status: open|evidence_exhausted}]
+    last_round_new_sources: int
+    last_round_new_findings: int
+    writer_change_notes: str
 
     # Output
     final_report: str
