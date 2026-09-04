@@ -1,9 +1,10 @@
 """Tests for per-item gap queries and evidence exhaustion in the researcher.
 
 Covers generate_gap_queries_for_items (dedup, no-open-items fallback, LLM
-failure fallback) and researcher_node revise-pass behavior (whole-pass
-zero-new-sources marks open items evidence_exhausted; progress keeps them
-open).
+failure fallback) and researcher_node revise-pass behavior: whole-pass
+zero-new-sources marks open items evidence_exhausted only after a genuine
+multi-query attempt (>= 2 queries searched); single-query rounds keep items
+open; progress keeps them open.
 """
 
 import types
@@ -156,23 +157,34 @@ class TestGenerateGapQueriesForItems:
 
 
 class TestResearcherNodeExhaustion:
-    def test_revise_zero_yield_marks_open_items_exhausted(self, monkeypatch):
-        """Open items plus zero new sources across the whole revise pass mark
-        every open item evidence_exhausted and report zero deltas."""
-        state = _revise_state()
-
-        # Round-1 query is a duplicate, so regeneration targets open items via
-        # the per-item generator; the fake LLM returns fresh item queries.
-        monkeypatch.setattr(
-            "ora.agents.researcher.get_llm",
-            lambda *a, **kw: _FakeLLM(
-                "enterprise pricing breakdown 2026\nglobal AI market outlook 2026\n"
-            ),
+    def test_revise_zero_yield_with_multiple_queries_marks_open_items_exhausted(self, monkeypatch):
+        """A revise pass that genuinely searched at least two queries and
+        found nothing marks every open item evidence_exhausted and reports
+        zero deltas."""
+        # min_sources (15 at intensity 3) is NOT met, so the round does not
+        # break after one query: two distinct fresh round-1 queries are both
+        # searched and both yield nothing, a genuine >= 2-query attempt.
+        state = _revise_state(
+            sources=[Source(url="https://example.com/0", title="Source 0")],
+            search_queries=["plan query one", "plan query two"],
+            executed_queries=[],
         )
+
         # Every search returns zero candidate URLs.
         monkeypatch.setattr(
             "ora.tools.search.web_search",
             _FakeTool("No results matched your search."),
+        )
+        # Gap rounds only ever re-propose an already-executed query, so the
+        # loop terminates right after the two real searches.
+        monkeypatch.setattr(
+            "ora.agents.researcher.get_llm",
+            lambda *a, **kw: _FakeLLM("plan query one\n"),
+        )
+        # Template fallback is not under test; force it empty so the loop
+        # ends cleanly once per-item regeneration finds nothing fresh.
+        monkeypatch.setattr(
+            "ora.agents.researcher.generate_gap_queries", lambda query, intensity: []
         )
 
         result = researcher_node(state)
@@ -182,10 +194,33 @@ class TestResearcherNodeExhaustion:
         assert result["review_items"]
         assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
 
+    def test_revise_single_query_round_keeps_items_open(self, monkeypatch):
+        """Regression guard: when min_sources is already met, the forced
+        revise round executes only ONE query before breaking, so a zero-yield
+        single search must NOT exhaust the open items (they were never
+        genuinely attempted; a future REVISE pass should try other variants)."""
+        state = _revise_state(
+            search_queries=["fresh query one"],
+            executed_queries=[],
+        )
+        # The single fresh query yields no candidate URLs; min_sources is met
+        # so _scrape_and_collect returns True and the round breaks after it.
+        monkeypatch.setattr(
+            "ora.tools.search.web_search",
+            _FakeTool("No results matched your search."),
+        )
+
+        result = researcher_node(state)
+
+        assert result["last_round_new_sources"] == 0
+        assert result["review_items"]
+        assert all(item["status"] == "open" for item in result["review_items"])
+
     def test_revise_duplicate_regeneration_breaks_without_templates(self, monkeypatch):
         """When even per-item regeneration only repeats executed queries, the
-        researcher breaks instead of falling back to generic templates, and
-        the pass still exhausts the open items."""
+        researcher breaks instead of falling back to generic templates; with
+        zero queries executed the open items are NOT exhausted (no genuine
+        attempt this pass)."""
         state = _revise_state()
 
         def fail_if_templates_used(query, intensity):
@@ -209,7 +244,8 @@ class TestResearcherNodeExhaustion:
         result = researcher_node(state)
 
         assert result["last_round_new_sources"] == 0
-        assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
+        assert result["review_items"]
+        assert all(item["status"] == "open" for item in result["review_items"])
 
 
 class TestResearcherNodeProgress:

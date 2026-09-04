@@ -560,6 +560,13 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
     start_sources = len(sources)
     start_findings = len(findings)
 
+    # Queries actually searched this pass (not merely generated). On a revise
+    # pass where min_sources is already met the round typically breaks after
+    # ONE search (_scrape_and_collect returns True and ends the query loop),
+    # so the exhaustion rule below requires >= 2 of these before it will mark
+    # open items evidence_exhausted.
+    pass_executed_queries: list[str] = []
+
     round_num = 0
 
     while (len(sources) < min_sources or revise_round) and round_num < max_rounds:
@@ -665,6 +672,9 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
                 break
 
             executed_q_set.add(q)
+            # Count only queries that are actually searched this pass; the
+            # early-return above means some fresh queries are never reached.
+            pass_executed_queries.append(q)
             log.append(f"Search: {q}")
             emit_progress(config, f'Researcher: searching "{q}"', kind="search")
             r = web_search.invoke({"query": q})
@@ -725,16 +735,29 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
         if revise_round:
             revise_round = False
 
-    # Exhaustion rule: if this was a review-driven revise pass with open
-    # items and the WHOLE pass produced zero new sources, no item could be
-    # advanced. Mark every still-open item evidence_exhausted so the writer
-    # documents the gap honestly and the reviewer stops REVISE-ing for it.
+    # Exhaustion rule: mark open items evidence_exhausted only when this was
+    # a review-driven revise pass, open items exist, the WHOLE pass produced
+    # zero new sources, AND at least two queries were actually searched. The
+    # two-query floor matters because on a revise pass where min_sources is
+    # already met the inner query loop usually breaks after ONE search (the
+    # first _scrape_and_collect returns True and ends the round); exhausting
+    # on a single unlucky search would close genuinely addressable items.
+    # Fewer than two searches leaves items open so genuine attempts can
+    # accumulate across REVISE passes. NOTE for the Task 4 routing guard:
+    # route REVISE back to the researcher while open items remain and budget
+    # remains, even on zero-progress passes, so multi-pass attempts can
+    # accumulate before any item is judged exhausted.
     # Attribution is intentionally coarse (whole-pass, not per-item): gap
     # queries are generated per item, but scraped evidence is collected into
     # one shared pool, so a source cannot be reliably assigned to the item
     # that motivated it.
     review_items = state.get("review_items") or []
-    if revise_pass and open_items and (len(sources) - start_sources) == 0:
+    if (
+        revise_pass
+        and open_items
+        and (len(sources) - start_sources) == 0
+        and len(pass_executed_queries) >= 2
+    ):
         for item in review_items:
             if item.get("status") == "open":
                 item["status"] = "evidence_exhausted"
