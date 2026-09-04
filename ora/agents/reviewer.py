@@ -120,9 +120,10 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
         "review_verdict_raw": output,
         "revision_count": state.get("revision_count", 0) + 1,
         "review_items": review_items_from_verdict(verdict),
-        # NOTE: last_round_new_sources/findings are NOT reset here on purpose.
-        # route_after_reviewer runs immediately after this node and needs the
-        # just-audited pass's deltas to decide whether REVISE should continue.
-        # The researcher overwrites them on its next pass.
+        # NOTE: last_round_new_sources/findings are deliberately not reset
+        # here: the routing guard reads review_items statuses, and the next
+        # audit's NEW_SOURCES_SINCE_LAST_AUDIT context needs the researcher's
+        # just-completed deltas to survive this node. The researcher
+        # overwrites them on its next pass.
         "messages": [output],
     }

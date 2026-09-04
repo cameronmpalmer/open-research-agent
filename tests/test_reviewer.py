@@ -140,7 +140,7 @@ class TestReviewerNodeModelOverride:
 
 class TestReviewerNodeReviewItems:
     def test_revise_verdict_populates_review_items_without_resetting_deltas(self, monkeypatch):
-        """A REVISE verdict must surface open review_items and reset per-round deltas."""
+        """A REVISE verdict must surface open review_items; per-round deltas are owned by the researcher."""
         from ora.agents import reviewer as reviewer_module
         from ora.agents.reviewer import reviewer_node
 
