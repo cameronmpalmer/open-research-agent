@@ -25,6 +25,21 @@ If sources disagree, is this documented with both positions?
 ### 7. Completeness (SUGGESTED)
 Does the report address all aspects of the query?
 
+## Revision Audit Context
+PREVIOUS_ITEMS_AND_STATUS: {review_items}
+WRITER_CHANGE_NOTES: {writer_change_notes}
+NEW_SOURCES_SINCE_LAST_AUDIT: {new_sources_count}
+
+## Re-audit Instructions
+When PREVIOUS_ITEMS_AND_STATUS is not "(first audit)", this is a RE-AUDIT of a revised report. For EACH previous blocking/required item, determine its disposition in the updated report:
+
+- **Addressed**: the writer's disposition claims the item was resolved AND the report actually reflects the change. Do NOT re-raise it.
+- **Evidence exhausted and honestly documented**: the item was already marked evidence_exhausted in the previous audit AND the writer documented the limitation honestly in the report. ACCEPT it as an unresolvable gap. Do NOT REVISE for it, even if the writer's disposition says it was only partially addressed or documented as a gap. List it in "unresolvable_gaps".
+- **Actionable and unaddressed**: an open item was not addressed, or the disposition claims it resolved but the report does not reflect it. REVISE and list it under "blocking" or "required" with the specific miss.
+- You may still raise NEW issues (blocking/required/suggested).
+
+Read dispositions from WRITER_CHANGE_NOTES, but treat them as CLAIMS TO VERIFY against the report, not as truth. Never REVISE solely for items that were evidence_exhausted in the previous audit when the report documents them.
+
 ## Output Format
 Return a JSON object:
 ```json
@@ -34,7 +49,8 @@ Return a JSON object:
   "required": ["issue 1"],
   "suggested": ["issue 1"],
   "contradicting_evidence_found": ["evidence with source"],
-  "confidence_recalibrations": {{"claim": "new_level"}}
+  "confidence_recalibrations": {{"claim": "new_level"}},
+  "unresolvable_gaps": ["gap text (only for evidence_exhausted items you accept)"]
 }}
 ```
 

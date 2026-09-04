@@ -166,3 +166,138 @@ class TestReviewerNodeReviewItems:
         # Deltas are deliberately NOT reset here (routing reads them right
         # after this node); the researcher owns last_round_new_*.
         assert "last_round_new_sources" not in result
+
+
+class _AuditRecordingLLM:
+    """Records every prompt and returns canned content on each invoke."""
+
+    def __init__(self, contents):
+        self.prompts = []
+        self._contents = list(contents)
+
+    def invoke(self, prompt):
+        self.prompts.append(prompt)
+        content = self._contents.pop(0)
+        return type("_Response", (), {"content": content})()
+
+
+PASS_WITH_GAPS_JSON = (
+    '{"verdict": "PASS", "blocking": [], "required": [], "suggested": [],'
+    ' "contradicting_evidence_found": [], "confidence_recalibrations": {},'
+    ' "unresolvable_gaps": ["2026 outlook unavailable in sources"]}'
+)
+
+REVISE_ACTIONABLE_JSON = (
+    '{"verdict": "REVISE", "blocking": ["Add pricing details: disposition says resolved'
+    ' but the report still omits pricing"], "required": [], "suggested": [],'
+    ' "contradicting_evidence_found": [], "confidence_recalibrations": {},'
+    ' "unresolvable_gaps": []}'
+)
+
+
+class TestReviewerNodeRevisionAudit:
+    """Re-audits receive the previous items with statuses, the writer's change
+    notes, and the new-source count; the verdict drives which items stay open."""
+
+    def _audit_state(self, **overrides) -> dict:
+        state = {
+            "query": "Rust vs Go",
+            "draft_report": "# Research\nrevised body",
+            "review_items": [
+                {"category": "blocking", "text": "Add pricing details", "status": "open"},
+                {
+                    "category": "required",
+                    "text": "2026 outlook unavailable in sources",
+                    "status": "evidence_exhausted",
+                },
+            ],
+            "writer_change_notes": (
+                "## Changes made\n"
+                "- [blocking] Add pricing details: resolved with new source.\n"
+                "- [required] 2026 outlook unavailable in sources: documented as a gap.\n"
+            ),
+            "last_round_new_sources": 3,
+            "last_round_new_findings": 2,
+            "revision_count": 1,
+        }
+        state.update(overrides)
+        return state
+
+    def test_prompt_carries_items_notes_and_new_source_count(self, monkeypatch):
+        """The re-audit prompt must include every previous item with category
+        and status, the writer's change notes, and the new-source count."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        llm = _AuditRecordingLLM([PASS_WITH_GAPS_JSON])
+        monkeypatch.setattr(
+            reviewer_module,
+            "get_llm",
+            lambda model_name, temperature=0.2: llm,
+        )
+
+        result = reviewer_node(self._audit_state())
+
+        prompt = llm.prompts[-1]
+        assert "- [blocking] (open) Add pricing details" in prompt
+        assert "- [required] (evidence_exhausted) 2026 outlook unavailable in sources" in prompt
+        assert "Add pricing details: resolved with new source." in prompt
+        assert "2026 outlook unavailable in sources: documented as a gap." in prompt
+        assert "NEW_SOURCES_SINCE_LAST_AUDIT: 3" in prompt
+
+        # PASS with unresolvable_gaps parses; the exhausted gap is accepted
+        # (blocking/required empty) so no new open items are produced.
+        assert result["review_verdict"].verdict == "PASS"
+        assert result["review_verdict"].unresolvable_gaps == ["2026 outlook unavailable in sources"]
+        assert result["review_items"] == []
+        assert result["revision_count"] == 2
+
+    def test_revise_for_actionable_unaddressed_item(self, monkeypatch):
+        """When the writer's disposition claims an item resolved but the report
+        does not reflect it, the reviewer REVISEses and the item stays open."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        llm = _AuditRecordingLLM([REVISE_ACTIONABLE_JSON])
+        monkeypatch.setattr(
+            reviewer_module,
+            "get_llm",
+            lambda model_name, temperature=0.2: llm,
+        )
+
+        result = reviewer_node(self._audit_state())
+
+        assert result["review_verdict"].verdict == "REVISE"
+        assert result["review_verdict"].unresolvable_gaps == []
+        # The re-raised actionable item becomes the next pass's open item.
+        assert result["review_items"] == [
+            {
+                "category": "blocking",
+                "text": (
+                    "Add pricing details: disposition says resolved but the report"
+                    " still omits pricing"
+                ),
+                "status": "open",
+            }
+        ]
+        assert result["revision_count"] == 2
+
+    def test_first_audit_defaults_context_placeholders(self, monkeypatch):
+        """A first audit (no review_items/notes/deltas) renders the context
+        placeholders with their default values."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        llm = _AuditRecordingLLM([PASS_WITH_GAPS_JSON])
+        monkeypatch.setattr(
+            reviewer_module,
+            "get_llm",
+            lambda model_name, temperature=0.2: llm,
+        )
+
+        reviewer_node({"query": "Rust vs Go", "draft_report": "# Research\nbody"})
+
+        prompt = llm.prompts[-1]
+        assert "(first audit)" in prompt
+        assert "(no revision notes)" in prompt
+        assert "NEW_SOURCES_SINCE_LAST_AUDIT: 0" in prompt

@@ -90,9 +90,23 @@ class TestFullPipeline:
             == "__end__"
         )
         rev_verdict = ReviewVerdict(verdict="REVISE")
+        # REVISE with an open (non-exhausted) review item keeps looping.
         assert (
-            route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 0})
+            route_after_reviewer(
+                {
+                    "review_verdict": rev_verdict,
+                    "revision_count": 0,
+                    "review_items": [
+                        {"category": "blocking", "text": "add pricing", "status": "open"}
+                    ],
+                }
+            )
             == "researcher"
+        )
+        # REVISE without any open item (all exhausted, or a legacy state that
+        # never set review_items) stops: nothing actionable remains.
+        assert (
+            route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 0}) == "__end__"
         )
         assert (
             route_after_reviewer({"review_verdict": rev_verdict, "revision_count": 3}) == "__end__"

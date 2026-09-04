@@ -132,7 +132,16 @@ def route_after_writer(state: ResearchState) -> Literal["reviewer", "__end__"]:
 
 
 def route_after_reviewer(state: ResearchState) -> Literal["researcher", "__end__"]:
-    """Route after review: revise if needed, end if pass or max revisions."""
+    """Route after review: revise while open review items remain, end on
+    PASS, on budget exhaustion, or when nothing actionable is left.
+
+    The REVISE branch is a convergent guard, not a blind counter: it only
+    sends execution back to the researcher while at least one open
+    (non-exhausted) review item remains. Zero-progress passes still route
+    back while an open item remains (letting per-item attempts accumulate
+    across passes); when the researcher has exhausted every item, the next
+    audit closes them as unresolvable gaps and the loop stops.
+    """
     verdict = state.get("review_verdict")
     if verdict is None:
         return "__end__"
@@ -143,6 +152,14 @@ def route_after_reviewer(state: ResearchState) -> Literal["researcher", "__end__
     if v == "PASS":
         return "__end__"
     elif revision_count < 3:
-        return "researcher"
+        # Convergent loop: only keep revising while at least one open
+        # (non-exhausted) review item remains. Zero-progress passes still
+        # route back while an open item remains, letting per-item attempts
+        # accumulate across passes; when all items are exhausted the next
+        # audit closes them as unresolvable gaps.
+        open_items = [i for i in state.get("review_items", []) if i.get("status") == "open"]
+        if open_items:
+            return "researcher"
+        return "__end__"
     else:
         return "__end__"

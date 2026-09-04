@@ -71,6 +71,12 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
     Receives the draft report and original query. Does NOT receive the
     researcher's intermediate findings or search queries. Uses a different
     model provider from the researcher to prevent correlated errors.
+
+    On re-audits (state carries review_items from the previous audit) the
+    prompt additionally receives the previous items with their statuses, the
+    writer's change notes, and the count of new sources found since the last
+    audit, so the reviewer can verify the writer's claimed dispositions
+    against the updated report instead of re-raising resolved items.
     """
     from ora.progress import emit_progress
 
@@ -81,9 +87,17 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
 
     llm = get_llm(model_name, temperature=0.2)
 
+    items = state.get("review_items", [])
+    items_text = (
+        "\n".join(f"- [{i.get('category')}] ({i.get('status')}) {i.get('text')}" for i in items)
+        or "(first audit)"
+    )
     prompt_text = REVIEWER_PROMPT.format(
         query=state.get("query", ""),
         report=state.get("draft_report", ""),
+        review_items=items_text,
+        writer_change_notes=state.get("writer_change_notes", "") or "(no revision notes)",
+        new_sources_count=str(state.get("last_round_new_sources", 0)),
     )
 
     response = llm.invoke(prompt_text)
