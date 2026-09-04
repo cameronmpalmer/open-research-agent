@@ -346,7 +346,7 @@ def research(
         review_items = final_state.get("review_items") or []
         open_items = [i for i in review_items if i.get("status") == "open"]
         exhausted_items = [i for i in review_items if i.get("status") == "evidence_exhausted"]
-        if _verdict_value(final_state) == "REVISE" or open_items or gap_texts:
+        if _verdict_value(final_state) == "REVISE" or open_items or gap_texts or exhausted_items:
             n = len(open_items)
             m = len(exhausted_items) + len(gap_texts)
             click.echo(

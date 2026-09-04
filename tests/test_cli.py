@@ -754,6 +754,38 @@ class TestCLI:
         assert received_states
         assert received_states[0]["max_revisions"] == 5
 
+    def test_explicit_max_revisions_three_overrides_config_five(self, monkeypatch):
+        """--max-revisions 3 must beat config limits.max_revisions=5 (None sentinel)."""
+        from ora import cli as cli_module
+
+        received_states = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                received_states.append(state)
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        fake = _fake_settings()
+        fake.limits = SimpleNamespace(max_revisions=5)
+        monkeypatch.setattr(cli_module, "load_config", lambda: fake)
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "A")
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["research", "Rust vs Go", "--no-save", "--max-revisions", "3"]
+        )
+
+        assert result.exit_code == 0
+        assert received_states[0]["max_revisions"] == 3
+
     def test_research_accepts_explicit_single_revision_flag(self, monkeypatch):
         """An explicit --max-revisions 1 (single-audit budget) is accepted and
         reaches the graph state; IntRange lower bound is inclusive."""

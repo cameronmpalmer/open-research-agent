@@ -46,8 +46,8 @@ output:                              # parsed but not yet consumed by the CLI
   always_include_sources: true
 
 limits:                              # written by config --init and shown by
-  max_revisions: 3                   # config --show; the CLI currently uses
-  default_intensity: 2               # its own flag defaults for these
+  max_revisions: 3                   # config --show; the revision budget when
+  default_intensity: 2               # --max-revisions is not passed
 
 provider:
   default: deepseek                  # used when a model name has no prefix
@@ -108,10 +108,10 @@ CLI**. Reserved for future report-format controls.
 
 ### limits
 
-Written by `config --init` and displayed by `config --show`, but the CLI
-currently uses its own flag defaults (`--intensity` defaults to 2,
-`--max-revisions` to 3). The YAML values are not yet wired into command
-defaults.
+`limits.max_revisions` is now wired: it is the revision budget used whenever
+`--max-revisions` is not passed explicitly (an explicit flag wins).
+`limits.default_intensity` is parsed and shown by `config --show` but the CLI
+still uses its own `--intensity` default of 2.
 
 | Key | Default |
 |---|---|
