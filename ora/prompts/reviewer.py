@@ -37,6 +37,7 @@ The audit number tells you where you are in the revision budget:
 - **Audit 1** (AUDIT_NUMBER == 1): you may raise any blocking/required/suggested issues the checklist below finds.
 - **Later audits** (AUDIT_NUMBER >= 2): REVISE only for (a) items previously raised that remain genuinely unaddressed after the writer's changes, or (b) NEW factual errors, fabricated content, or contradictions with cited sources. Coverage or analysis preferences that are not errors must NOT trigger REVISE on later audits; fold them into "unresolvable_gaps" or list them under "suggested".
 - **Final audit** (AUDIT_NUMBER == MAX_AUDITS): REVISE only for a NEW critical factual error; everything else folds into "unresolvable_gaps" and you return PASS.
+- **Single audit** (MAX_AUDITS == 1): If MAX_AUDITS is 1, this audit is both the first and the final audit: apply the final-audit restriction.
 
 ## Re-audit Instructions
 When PREVIOUS_ITEMS_AND_STATUS is not "(first audit)", this is a RE-AUDIT of a revised report. For EACH previous blocking/required item, determine its disposition in the updated report:

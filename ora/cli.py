@@ -150,7 +150,12 @@ def _run_collected(collector: UsageCollector, func, *args, **kwargs):
     "--model", "-m", default=None, help="LLM model for researcher/writer (e.g., deepseek-v4-flash)"
 )
 @click.option("--reviewer-model", "-r", default=None, help="LLM model for adversarial reviewer")
-@click.option("--max-revisions", type=int, default=3, help="Max writer-reviewer revision cycles")
+@click.option(
+    "--max-revisions",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Max writer-reviewer revision cycles (default: config limits.max_revisions)",
+)
 @click.option("--no-review", is_flag=True, help="Skip adversarial review")
 @click.option(
     "--quiet", is_flag=True, help="Disable live progress indicators and use spinner-only output"
@@ -275,10 +280,10 @@ def research(
     research_graph = build_research_graph(intensity=intensity, no_review=no_review)
     plan_result["plan_approved"] = True
     # Wire the revision budget into the research graph: an explicit
-    # --max-revisions flag wins; when it is left at its default the
-    # configured limits.max_revisions value is honored instead. Both default
-    # to 3, so the flag default and the config default agree.
-    effective_cap = max_revisions if max_revisions != 3 else settings.limits.max_revisions
+    # --max-revisions flag wins (None = flag unset, so the configured
+    # limits.max_revisions value is honored instead). Both default to 3, so
+    # the flag-unset path and the config default agree.
+    effective_cap = max_revisions if max_revisions is not None else settings.limits.max_revisions
     plan_result["max_revisions"] = effective_cap
     # CLI model flags become run-scoped config overrides so every agent and
     # internal helper resolves them through the same config path.
@@ -305,7 +310,7 @@ def research(
     if intensity < 3:
         if no_review:
             click.echo("  Note: --no-review is only relevant for intensity 3+.", err=True)
-        if max_revisions != 3:
+        if max_revisions is not None and max_revisions != 3:
             click.echo("  Note: --max-revisions is only relevant for intensity 3+.", err=True)
 
     sources_count = len(final_state.get("sources") or [])
@@ -349,6 +354,13 @@ def research(
                 f" {m} exhausted (see report's Changes made / evidence notes).",
                 err=True,
             )
+            # Show the accepted evidence-gap texts so the fold path is
+            # auditable from the CLI (sample at most 3, ~80 chars each).
+            if gap_texts:
+                click.echo("  Accepted evidence gaps:", err=True)
+                for gap in gap_texts[:3]:
+                    snippet = gap if len(gap) <= 80 else gap[:77] + "..."
+                    click.echo(f"    - {snippet}", err=True)
 
     draft = final_state.get("final_report") or final_state.get(
         "draft_report", "No report generated."

@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from ora.agents.reviewer import parse_reviewer_output
 
 
@@ -92,36 +94,119 @@ class TestReviewItemsFromVerdict:
 
 
 class TestFoldRepeatedExhausted:
-    """The hard repeat-raise guard: a blocking/required item whose normalized
-    text was previously evidence_exhausted folds into unresolvable_gaps."""
+    """The hard repeat-raise guard folds a blocking/required item whose
+    normalized text was previously evidence_exhausted ONLY when the writer
+    acknowledged it in the change notes or this is the final audit."""
 
     def _verdict(self, **overrides):
         from ora.state import ReviewVerdict
 
         fields = {
             "verdict": "REVISE",
-            "blocking": ["X"],
-            "required": ["Y"],
-            "suggested": ["S"],
+            "blocking": [],
+            "required": [],
+            "suggested": [],
             "unresolvable_gaps": [],
         }
         fields.update(overrides)
         return ReviewVerdict(**fields)
 
-    def test_exhausted_blocking_item_folds_out_of_blocking(self):
+    def _exhausted(self, text="X"):
+        return [{"category": "blocking", "text": text, "status": "evidence_exhausted"}]
+
+    def _notes_for(self, text="X", marker="documented as a gap"):
+        return f"## Changes made\n- [blocking] {text}: {marker}.\n"
+
+    def test_exhausted_and_documented_folds_out_of_blocking(self):
         from ora.agents.reviewer import _fold_repeated_exhausted
 
-        previous = [{"category": "blocking", "text": "X", "status": "evidence_exhausted"}]
-        verdict = _fold_repeated_exhausted(self._verdict(blocking=["X"]), previous)
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"]),
+            self._exhausted(),
+            self._notes_for(),
+            is_final_audit=False,
+        )
 
         assert verdict.blocking == []
-        assert "X" in verdict.unresolvable_gaps
+        assert verdict.unresolvable_gaps == ["X"]
+
+    @pytest.mark.parametrize("marker", ["documented as a gap", "partially addressed", "resolved"])
+    def test_exhausted_acknowledged_with_any_disposition_marker_folds(self, marker):
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"]),
+            self._exhausted(),
+            self._notes_for(marker=marker),
+            is_final_audit=False,
+        )
+
+        assert verdict.blocking == []
+        assert verdict.unresolvable_gaps == ["X"]
+
+    def test_exhausted_undocumented_not_final_stays_blocking(self):
+        """The exhausted-but-undocumented documentation-gap REVISE must be
+        able to reach the writer: without acknowledgment and before the final
+        audit the re-raise stays in blocking."""
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"]),
+            self._exhausted(),
+            writer_change_notes="",
+            is_final_audit=False,
+        )
+
+        assert verdict.blocking == ["X"]
+        assert verdict.unresolvable_gaps == []
+
+    def test_acknowledgment_of_a_different_item_does_not_fold(self):
+        """Notes that respond to a different item are not acknowledgment of X."""
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"]),
+            self._exhausted(),
+            writer_change_notes=self._notes_for(text="Y"),
+            is_final_audit=False,
+        )
+
+        assert verdict.blocking == ["X"]
+        assert verdict.unresolvable_gaps == []
+
+    def test_exhausted_undocumented_final_audit_folds(self):
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"]),
+            self._exhausted(),
+            writer_change_notes="",
+            is_final_audit=True,
+        )
+
+        assert verdict.blocking == []
+        assert verdict.unresolvable_gaps == ["X"]
+
+    def test_exhausted_documented_final_audit_folds(self):
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"]),
+            self._exhausted(),
+            self._notes_for(),
+            is_final_audit=True,
+        )
+
+        assert verdict.blocking == []
+        assert verdict.unresolvable_gaps == ["X"]
 
     def test_open_previous_item_is_not_folded(self):
         from ora.agents.reviewer import _fold_repeated_exhausted
 
         previous = [{"category": "blocking", "text": "X", "status": "open"}]
-        verdict = _fold_repeated_exhausted(self._verdict(blocking=["X"]), previous)
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"]), previous, self._notes_for(), is_final_audit=True
+        )
 
         assert verdict.blocking == ["X"]
         assert verdict.unresolvable_gaps == []
@@ -133,7 +218,10 @@ class TestFoldRepeatedExhausted:
             {"category": "required", "text": "  Add Pricing Data  ", "status": "evidence_exhausted"}
         ]
         verdict = _fold_repeated_exhausted(
-            self._verdict(blocking=["add pricing data"], required=[]), previous
+            self._verdict(blocking=["add pricing data"]),
+            previous,
+            writer_change_notes="## Changes made\n- [required] Add Pricing Data: documented as a gap.\n",
+            is_final_audit=False,
         )
 
         assert verdict.blocking == []
@@ -142,32 +230,145 @@ class TestFoldRepeatedExhausted:
     def test_unexhausted_new_items_are_kept_alongside_folded_ones(self):
         from ora.agents.reviewer import _fold_repeated_exhausted
 
-        previous = [{"category": "blocking", "text": "X", "status": "evidence_exhausted"}]
         verdict = _fold_repeated_exhausted(
-            self._verdict(blocking=["X"], required=["NEW fabricated statistic"]), previous
+            self._verdict(blocking=["X"], required=["NEW fabricated statistic"]),
+            self._exhausted(),
+            self._notes_for(),
+            is_final_audit=False,
         )
 
         assert verdict.blocking == []
         assert verdict.required == ["NEW fabricated statistic"]
-        assert "X" in verdict.unresolvable_gaps
+        assert verdict.unresolvable_gaps == ["X"]
 
     def test_no_previous_items_returns_verdict_unchanged(self):
         from ora.agents.reviewer import _fold_repeated_exhausted
 
-        verdict = _fold_repeated_exhausted(self._verdict(blocking=["X"]), [])
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"]), [], self._notes_for(), is_final_audit=True
+        )
         assert verdict.blocking == ["X"]
         assert verdict.unresolvable_gaps == []
 
-    def test_existing_unresolvable_gaps_are_preserved(self):
+    def test_existing_model_gaps_are_preserved_and_fold_appends(self):
         from ora.agents.reviewer import _fold_repeated_exhausted
 
-        previous = [{"category": "blocking", "text": "X", "status": "evidence_exhausted"}]
         verdict = _fold_repeated_exhausted(
-            self._verdict(blocking=["X"], unresolvable_gaps=["existing gap"]), previous
+            self._verdict(blocking=["X"], unresolvable_gaps=["existing gap"]),
+            self._exhausted(),
+            self._notes_for(),
+            is_final_audit=False,
         )
 
         assert verdict.blocking == []
         assert verdict.unresolvable_gaps == ["existing gap", "X"]
+
+    def test_text_present_in_both_blocking_and_required_folds_once(self):
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"], required=["X"]),
+            self._exhausted(),
+            self._notes_for(),
+            is_final_audit=False,
+        )
+
+        assert verdict.blocking == []
+        assert verdict.required == []
+        assert verdict.unresolvable_gaps == ["X"]
+
+    def test_fold_does_not_duplicate_model_supplied_gap(self):
+        """Folding never appends a text the model already accepted into gaps."""
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"], required=["X"], unresolvable_gaps=["X"]),
+            self._exhausted(),
+            self._notes_for(),
+            is_final_audit=False,
+        )
+
+        assert verdict.blocking == []
+        assert verdict.required == []
+        assert verdict.unresolvable_gaps == ["X"]
+
+
+class TestCarryExhaustedItems:
+    """Previously-exhausted items the reviewer neither re-raised, accepted
+    into gaps, nor had acknowledged by the writer carry forward as
+    evidence_exhausted records so history survives into the next audit."""
+
+    def _exhausted(self, text="X"):
+        return [{"category": "required", "text": text, "status": "evidence_exhausted"}]
+
+    def _notes_for(self, text="X"):
+        return f"## Changes made\n- [required] {text}: documented as a gap.\n"
+
+    def test_unacknowledged_not_rerisen_item_is_carried(self):
+        from ora.agents.reviewer import _carry_exhausted_items
+        from ora.state import ReviewVerdict
+
+        carried = _carry_exhausted_items(
+            ReviewVerdict(verdict="PASS"),
+            self._exhausted(),
+            writer_change_notes="",
+        )
+
+        assert carried == [{"category": "required", "text": "X", "status": "evidence_exhausted"}]
+
+    def test_item_accepted_into_gaps_is_not_carried(self):
+        from ora.agents.reviewer import _carry_exhausted_items
+        from ora.state import ReviewVerdict
+
+        carried = _carry_exhausted_items(
+            ReviewVerdict(verdict="PASS", unresolvable_gaps=["X"]),
+            self._exhausted(),
+            writer_change_notes="",
+        )
+
+        assert carried == []
+
+    def test_rerisen_item_is_not_carried(self):
+        """A re-raise is handled by the fold decision (folded or kept open),
+        so it is not also carried as an exhausted record."""
+        from ora.agents.reviewer import _carry_exhausted_items
+        from ora.state import ReviewVerdict
+
+        carried = _carry_exhausted_items(
+            ReviewVerdict(verdict="REVISE", blocking=["X"]),
+            self._exhausted(),
+            writer_change_notes="",
+        )
+
+        assert carried == []
+
+    def test_writer_acknowledged_item_is_not_carried(self):
+        from ora.agents.reviewer import _carry_exhausted_items
+        from ora.state import ReviewVerdict
+
+        carried = _carry_exhausted_items(
+            ReviewVerdict(verdict="PASS"),
+            self._exhausted(),
+            writer_change_notes=self._notes_for(),
+        )
+
+        assert carried == []
+
+    def test_open_previous_items_are_never_carried(self):
+        from ora.agents.reviewer import _carry_exhausted_items
+        from ora.state import ReviewVerdict
+
+        previous = [
+            {"category": "blocking", "text": "X", "status": "open"},
+            {"category": "required", "text": "Y", "status": "evidence_exhausted"},
+        ]
+        carried = _carry_exhausted_items(
+            ReviewVerdict(verdict="PASS"),
+            previous,
+            writer_change_notes="",
+        )
+
+        assert carried == [{"category": "required", "text": "Y", "status": "evidence_exhausted"}]
 
 
 class _PassLLM:
@@ -396,6 +597,152 @@ class TestReviewerNodeRevisionAudit:
         ]
         assert result["revision_count"] == 2
 
+    def test_undocumented_exhausted_rerisen_stays_blocking_before_final(self, monkeypatch):
+        """I1: when the writer has NOT documented an exhausted item and the
+        audit is not final, a re-raise must stay in blocking so the
+        exhausted-but-undocumented documentation-gap REVISE reaches the
+        writer (the fold must not silently accept it)."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        rerisen_json = (
+            '{"verdict": "REVISE", "blocking": ["2026 outlook unavailable in sources"],'
+            ' "required": [], "suggested": [], "contradicting_evidence_found": [],'
+            ' "confidence_recalibrations": {}, "unresolvable_gaps": []}'
+        )
+        llm = _AuditRecordingLLM([rerisen_json])
+        monkeypatch.setattr(
+            reviewer_module,
+            "get_llm",
+            lambda model_name, temperature=0.2: llm,
+        )
+
+        state = {
+            "query": "Rust vs Go",
+            "draft_report": "# Research\nrevised body",
+            "review_items": [
+                {
+                    "category": "required",
+                    "text": "2026 outlook unavailable in sources",
+                    "status": "evidence_exhausted",
+                }
+            ],
+            # The writer did NOT document the limitation this round.
+            "writer_change_notes": "(no revision notes)",
+            "revision_count": 1,  # audit 2 of 3: not final
+        }
+        result = reviewer_node(state)
+
+        verdict = result["review_verdict"]
+        assert verdict.verdict == "REVISE"
+        assert verdict.blocking == ["2026 outlook unavailable in sources"]
+        assert verdict.unresolvable_gaps == []
+        # The documentation-gap item becomes the next pass's open item.
+        assert result["review_items"] == [
+            {
+                "category": "blocking",
+                "text": "2026 outlook unavailable in sources",
+                "status": "open",
+            }
+        ]
+        assert result["revision_count"] == 2
+
+    def test_undocumented_exhausted_rerisen_folds_on_final_audit(self, monkeypatch):
+        """I1: on the FINAL audit a re-raised exhausted item folds into gaps
+        even when the writer never documented it: no researcher pass remains,
+        and the gap text must be surfaced in the end state."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        rerisen_json = (
+            '{"verdict": "REVISE", "blocking": ["2026 outlook unavailable in sources"],'
+            ' "required": [], "suggested": [], "contradicting_evidence_found": [],'
+            ' "confidence_recalibrations": {}, "unresolvable_gaps": []}'
+        )
+        llm = _AuditRecordingLLM([rerisen_json])
+        monkeypatch.setattr(
+            reviewer_module,
+            "get_llm",
+            lambda model_name, temperature=0.2: llm,
+        )
+
+        state = {
+            "query": "Rust vs Go",
+            "draft_report": "# Research\nrevised body",
+            "review_items": [
+                {
+                    "category": "required",
+                    "text": "2026 outlook unavailable in sources",
+                    "status": "evidence_exhausted",
+                }
+            ],
+            "writer_change_notes": "(no revision notes)",
+            "revision_count": 2,  # audit 3 of 3: FINAL
+        }
+        result = reviewer_node(state)
+
+        verdict = result["review_verdict"]
+        assert verdict.verdict == "REVISE"
+        assert verdict.blocking == []
+        assert verdict.unresolvable_gaps == ["2026 outlook unavailable in sources"]
+        assert result["review_items"] == []
+        assert result["revision_count"] == 3
+
+    def test_exhausted_item_carried_then_dropped_after_documentation(self, monkeypatch):
+        """I2: an exhausted item the writer has NOT documented persists in
+        review_items as evidence_exhausted after a PASS-with-gaps audit; once
+        the writer documents it and the reviewer accepts it into gaps, the
+        record is gone."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        gap_item = "2026 outlook unavailable in sources"
+        pass_with_other_gap = (
+            '{"verdict": "PASS", "blocking": [], "required": [], "suggested": [],'
+            ' "contradicting_evidence_found": [], "confidence_recalibrations": {},'
+            ' "unresolvable_gaps": ["unrelated accepted gap"]}'
+        )
+        pass_accepting_item = (
+            '{"verdict": "PASS", "blocking": [], "required": [], "suggested": [],'
+            ' "contradicting_evidence_found": [], "confidence_recalibrations": {},'
+            f' "unresolvable_gaps": ["{gap_item}"]}}'
+        )
+        llm = _AuditRecordingLLM([pass_with_other_gap, pass_accepting_item])
+        monkeypatch.setattr(
+            reviewer_module,
+            "get_llm",
+            lambda model_name, temperature=0.2: llm,
+        )
+
+        def _state(notes):
+            return {
+                "query": "Rust vs Go",
+                "draft_report": "# Research\nrevised body",
+                "review_items": [
+                    {"category": "required", "text": gap_item, "status": "evidence_exhausted"}
+                ],
+                "writer_change_notes": notes,
+                "revision_count": 1,
+            }
+
+        # Phase 1: writer never documented the exhausted item; reviewer PASSes
+        # with a different accepted gap. The item must persist as
+        # evidence_exhausted (history survives, writer still sees it).
+        phase1 = reviewer_node(_state("(no revision notes)"))
+        assert phase1["review_verdict"].verdict == "PASS"
+        assert phase1["review_items"] == [
+            {"category": "required", "text": gap_item, "status": "evidence_exhausted"}
+        ]
+
+        # Phase 2: the writer documented the item and the reviewer accepts it
+        # into unresolvable_gaps. The exhausted record is now gone.
+        phase2 = reviewer_node(
+            _state(f"## Changes made\n- [required] {gap_item}: documented as a gap.\n")
+        )
+        assert phase2["review_verdict"].verdict == "PASS"
+        assert phase2["review_verdict"].unresolvable_gaps == [gap_item]
+        assert phase2["review_items"] == []
+
     def test_first_audit_defaults_context_placeholders(self, monkeypatch):
         """A first audit (no review_items/notes/deltas) renders the context
         placeholders with their default values and audit_number 1."""
@@ -487,3 +834,25 @@ class TestReviewerNodeRevisionAudit:
         assert "return PASS" in prompt
         # Scoped new-issue rule: no blanket permission to raise new issues.
         assert "New issues are scoped by the Audit Policy above" in prompt
+
+    def test_budget_one_prompt_notes_first_and_final_audit(self, monkeypatch):
+        """M2: with a budget of 1 the first audit is also the final audit; the
+        prompt must resolve the Audit-1 / Final-audit contradiction."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        llm = _AuditRecordingLLM([PASS_WITH_GAPS_JSON])
+        monkeypatch.setattr(
+            reviewer_module,
+            "get_llm",
+            lambda model_name, temperature=0.2: llm,
+        )
+
+        reviewer_node(
+            {"query": "Rust vs Go", "draft_report": "# Research\nbody", "max_revisions": 1}
+        )
+
+        prompt = llm.prompts[-1]
+        assert "AUDIT_NUMBER: 1" in prompt
+        assert "MAX_AUDITS: 1" in prompt
+        assert "both the first and the final audit" in prompt

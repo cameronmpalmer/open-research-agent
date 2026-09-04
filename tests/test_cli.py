@@ -333,6 +333,37 @@ class TestCLI:
 
         assert result.exit_code == 0
         assert "Report finalized with unresolved review items: 0 open, 1 exhausted" in result.output
+        # M4: the accepted evidence-gap text is printed so the fold path is
+        # auditable from the CLI.
+        assert "Accepted evidence gaps:" in result.output
+        assert "- 2026 market data unavailable" in result.output
+
+    def test_research_warning_truncates_long_gap_text(self, monkeypatch):
+        """Gap text samples in the end warning are truncated to ~80 chars."""
+        from ora.state import ReviewVerdict
+
+        long_gap = "This accepted evidence gap has an extremely long explanatory sentence " * 2
+        self._patch_research_graph(
+            monkeypatch,
+            {
+                "draft_report": "# Research\nbody",
+                "sources": [],
+                "findings": [],
+                "review_verdict": ReviewVerdict(verdict="PASS", unresolvable_gaps=[long_gap]),
+                "review_items": [],
+                "revision_count": 2,
+            },
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "--no-save"])
+
+        assert result.exit_code == 0
+        assert "Accepted evidence gaps:" in result.output
+        assert long_gap[:50] in result.output
+        # Truncated with an ellipsis, not the full text.
+        assert "..." in result.output
+        assert long_gap not in result.output
 
     def test_research_edit_path_modifies_plan(self, monkeypatch):
         from ora import cli as cli_module
@@ -690,7 +721,7 @@ class TestCLI:
         assert received_states[0]["max_revisions"] == 5
 
     def test_research_honors_config_limits_max_revisions_when_flag_default(self, monkeypatch):
-        """When --max-revisions is left at its default (3), the configured
+        """When --max-revisions is not passed (flag None), the configured
         settings.limits.max_revisions value is wired into the graph state."""
         from ora import cli as cli_module
 
@@ -722,3 +753,82 @@ class TestCLI:
         assert result.exit_code == 0
         assert received_states
         assert received_states[0]["max_revisions"] == 5
+
+    def test_research_accepts_explicit_single_revision_flag(self, monkeypatch):
+        """An explicit --max-revisions 1 (single-audit budget) is accepted and
+        reaches the graph state; IntRange lower bound is inclusive."""
+        from ora import cli as cli_module
+
+        received_states = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                received_states.append(state)
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "research",
+                "Rust vs Go",
+                "-y",
+                "--intensity",
+                "3",
+                "--max-revisions",
+                "1",
+                "--no-save",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert received_states
+        assert received_states[0]["max_revisions"] == 1
+
+    @pytest.mark.parametrize("value", ["0", "-1"])
+    def test_research_rejects_invalid_max_revisions_values(self, monkeypatch, value):
+        """M1: 0 and negative budgets are rejected at option parse time
+        (click.IntRange(min=1)) instead of being misinterpreted."""
+        from ora import cli as cli_module
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "research",
+                "Rust vs Go",
+                "-y",
+                "--intensity",
+                "3",
+                "--max-revisions",
+                value,
+                "--no-save",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Invalid value" in result.output

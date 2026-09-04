@@ -71,17 +71,68 @@ def _norm_item_text(text: str) -> str:
     return (text or "").strip().casefold()
 
 
-def _fold_repeated_exhausted(verdict: ReviewVerdict, previous_items: list[dict]) -> ReviewVerdict:
+# Disposition vocabulary the writer uses in its "Changes made" notes
+# (see REVISION_PROMPT). A previously-exhausted item counts as acknowledged
+# when the writer restated the item next to one of these markers.
+_ACKNOWLEDGED_MARKERS = ("resolved", "partially addressed", "documented as a gap")
+
+
+def _notes_acknowledge_item(notes: str, text: str) -> bool:
+    """True when the writer's change notes respond to the item.
+
+    The writer's change notes restate the exact item text with a disposition
+    marker (resolved / partially addressed / documented as a gap), so the
+    item text appearing in the notes means the writer acknowledged the item
+    in the updated report. Matching is normalized (strip + casefold).
+    """
+    if not notes or not text:
+        return False
+    norm_notes = _norm_item_text(notes)
+    norm_text = _norm_item_text(text)
+    if not norm_text:
+        return False
+    if norm_text in norm_notes:
+        return True
+    # Fallback: a disposition marker on the same line as the item text.
+    return any(
+        norm_text in line and any(marker in line for marker in _ACKNOWLEDGED_MARKERS)
+        for line in norm_notes.splitlines()
+    )
+
+
+def _should_fold_repeated_exhausted(
+    text: str, writer_change_notes: str, is_final_audit: bool
+) -> bool:
+    """Decide whether a re-raised previously-exhausted item may be folded.
+
+    Fold (accept into unresolvable_gaps) only when the writer acknowledged
+    the item in its change notes (so the report documents the limitation), or
+    when this is the final audit (no researcher pass will follow a REVISE).
+    Otherwise the item stays in blocking/required so the reviewer's
+    exhausted-but-undocumented REVISE can reach the writer.
+    """
+    return is_final_audit or _notes_acknowledge_item(writer_change_notes, text)
+
+
+def _fold_repeated_exhausted(
+    verdict: ReviewVerdict,
+    previous_items: list[dict],
+    writer_change_notes: str = "",
+    is_final_audit: bool = False,
+) -> ReviewVerdict:
     """Fold re-raised evidence_exhausted items out of blocking/required.
 
     Hard guard behind the reviewer prompt's no-repeat-raise rule: when the
     parsed verdict lists a blocking/required item whose normalized text was
     previously marked evidence_exhausted, the item must not become a fresh
-    open work item (that would burn another revision on something already
-    accepted as a gap). Its text is moved into unresolvable_gaps instead and
-    removed from blocking/required. The verdict value itself is left alone:
-    with nothing left in blocking/required the routing guard stops the loop
-    (no open review_items), and the CLI surfaces the folded gaps.
+    open work item that burns another revision on something the writer has
+    already answered. It is folded out of blocking/required into
+    unresolvable_gaps ONLY when the writer acknowledged it in the change
+    notes (the report documents the limitation) or this is the final audit.
+    Otherwise it stays in blocking/required so an exhausted-but-undocumented
+    documentation-gap REVISE can reach the writer. The verdict value itself
+    is left alone: with nothing left in blocking/required the routing guard
+    stops the loop (no open review_items), and the CLI surfaces the gaps.
     """
     if verdict is None or not previous_items:
         return verdict
@@ -97,16 +148,75 @@ def _fold_repeated_exhausted(verdict: ReviewVerdict, previous_items: list[dict])
     kept_blocking: list[str] = []
     kept_required: list[str] = []
     for text in verdict.blocking or []:
-        (folded if _norm_item_text(text) in exhausted else kept_blocking).append(text)
+        norm = _norm_item_text(text)
+        if norm in exhausted and _should_fold_repeated_exhausted(
+            text, writer_change_notes, is_final_audit
+        ):
+            folded.append(text)
+        else:
+            kept_blocking.append(text)
     for text in verdict.required or []:
-        (folded if _norm_item_text(text) in exhausted else kept_required).append(text)
+        norm = _norm_item_text(text)
+        if norm in exhausted and _should_fold_repeated_exhausted(
+            text, writer_change_notes, is_final_audit
+        ):
+            folded.append(text)
+        else:
+            kept_required.append(text)
     if not folded:
         return verdict
 
     verdict.blocking = kept_blocking
     verdict.required = kept_required
-    verdict.unresolvable_gaps = list(verdict.unresolvable_gaps or []) + folded
+    # Dedupe gap text: the same text may appear in blocking AND required, and
+    # may already be present in the model-supplied unresolvable_gaps.
+    existing_gaps = {_norm_item_text(g) for g in (verdict.unresolvable_gaps or [])}
+    for text in folded:
+        norm = _norm_item_text(text)
+        if norm not in existing_gaps:
+            verdict.unresolvable_gaps.append(text)
+            existing_gaps.add(norm)
     return verdict
+
+
+def _carry_exhausted_items(
+    verdict: ReviewVerdict,
+    previous_items: list[dict],
+    writer_change_notes: str = "",
+) -> list[dict]:
+    """Carry previously-exhausted items forward as evidence_exhausted records.
+
+    Items the reviewer neither re-raised this audit (so the fold decision did
+    not handle them), accepted into this verdict's unresolvable_gaps, nor had
+    acknowledged by the writer keep their evidence_exhausted record in
+    review_items. That keeps the repeat-raise guard multi-shot (history
+    survives into the next audit) and lets the writer see the item for
+    documentation; routing already ignores non-open statuses.
+    """
+    if not previous_items:
+        return []
+    re_raised = {_norm_item_text(t) for t in (verdict.blocking or []) + (verdict.required or [])}
+    accepted = {_norm_item_text(g) for g in (verdict.unresolvable_gaps or [])}
+    carried: list[dict] = []
+    for item in previous_items:
+        if item.get("status") != "evidence_exhausted":
+            continue
+        text = item.get("text") or ""
+        norm = _norm_item_text(text)
+        if not norm:
+            continue
+        if norm in re_raised or norm in accepted:
+            continue
+        if _notes_acknowledge_item(writer_change_notes, text):
+            continue
+        carried.append(
+            {
+                "category": item.get("category", "blocking"),
+                "text": text,
+                "status": "evidence_exhausted",
+            }
+        )
+    return carried
 
 
 def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[str, Any]:
@@ -127,7 +237,11 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
     concerns into unresolvable_gaps instead of issuing a REVISE that the
     routing cap would discard. A hard guard folds re-raised
     evidence_exhausted items out of blocking/required into
-    unresolvable_gaps.
+    unresolvable_gaps only when the writer acknowledged the item in its
+    change notes or this is the final audit; previously-exhausted items the
+    writer has not yet acknowledged are carried forward as evidence_exhausted
+    records so history survives into the next audit and the writer sees them
+    for documentation.
     """
     from ora.progress import emit_progress
 
@@ -166,12 +280,26 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
     response = llm.invoke(prompt_text)
     output = response.content if hasattr(response, "content") else str(response)
 
+    previous_items = state.get("review_items", [])
+    writer_change_notes = state.get("writer_change_notes", "") or ""
+    is_final_audit = audit_number >= cap
+
     verdict = parse_reviewer_output(output)
     # Hard repeat-raise guard: if the model re-raises a blocking/required
     # item whose normalized text was already evidence_exhausted in a previous
     # audit, fold it into unresolvable_gaps instead of letting it become a
-    # fresh open item that burns another revision round.
-    verdict = _fold_repeated_exhausted(verdict, state.get("review_items", []))
+    # fresh open item that burns another revision round. Folding is limited
+    # to items the writer acknowledged in its change notes (so the report
+    # documents the limitation) or to the final audit; otherwise the item
+    # stays in blocking/required so the exhausted-but-undocumented
+    # documentation-gap REVISE can reach the writer.
+    verdict = _fold_repeated_exhausted(verdict, previous_items, writer_change_notes, is_final_audit)
+    # Carry previously-exhausted items the writer has not yet acknowledged
+    # forward as evidence_exhausted records (I2): the guard keeps history and
+    # the end state cannot silently drop the exhausted item's text.
+    review_items = review_items_from_verdict(verdict) + _carry_exhausted_items(
+        verdict, previous_items, writer_change_notes
+    )
 
     v = verdict.verdict if hasattr(verdict, "verdict") else "PASS"
     if v == "REVISE":
@@ -187,7 +315,7 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
         "review_verdict": verdict,
         "review_verdict_raw": output,
         "revision_count": state.get("revision_count", 0) + 1,
-        "review_items": review_items_from_verdict(verdict),
+        "review_items": review_items,
         # NOTE: last_round_new_sources/findings are deliberately not reset
         # here: the routing guard reads review_items statuses, and the next
         # audit's NEW_SOURCES_SINCE_LAST_AUDIT context needs the researcher's
