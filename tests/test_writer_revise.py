@@ -181,6 +181,57 @@ def test_revision_mode_change_notes_survive_full_report_echo(monkeypatch):
     assert draft.count("## Bibliography") == 1
 
 
+def test_literal_order_full_report_echo_with_trailing_change_notes(monkeypatch):
+    """Literal-order interpretation: the LLM echoes the full previous report
+    (header + body + source table + bibliography) and appends the 'Changes
+    made' section at the very END, after the programmatic tail.
+
+    writer_change_notes must still be extracted from the raw response, and
+    the assembled draft must not duplicate programmatic sections - only the
+    fresh source table/bibliography (current sources) remain."""
+    echoed = (
+        "# Research: test query\n"
+        "**Intensity:** Level 3 | **Sources:** 1 | **Date:** 2026-09-03\n\n"
+        + PREV_BODY
+        + "\n"
+        + "## Source Table\n"
+        "| # | Title | URL | Type | Reliability |\n"
+        "|---|-------|-----|------|-------------|\n"
+        "| 1 | Old source | https://example.com/old | unknown | Medium |\n"
+        "\n"
+        "## Bibliography\n"
+        "1. Old source. [https://example.com/old](https://example.com/old)\n"
+        "\n"
+        "## Changes made\n"
+        "- [blocking] Add pricing details: resolved with new source.\n"
+        "- [required] 2026 outlook unavailable in sources: documented as a gap.\n"
+    )
+    llm = _RecordingLLM(content=echoed)
+    _patch_writer(monkeypatch, llm)
+
+    result = writer_node(_revision_state())
+
+    # Dispositions are extracted from the raw response (marker to end), even
+    # though the marker sits after the echoed programmatic tail.
+    assert "Add pricing details: resolved with new source." in result["writer_change_notes"]
+    assert (
+        "2026 outlook unavailable in sources: documented as a gap." in result["writer_change_notes"]
+    )
+
+    draft = result["draft_report"]
+    # No duplicated programmatic sections: exactly one of each, rebuilt fresh
+    # from the CURRENT sources (both old and new appear with the fresh
+    # header's source count of 2).
+    assert draft.count("# Research: test query") == 1
+    assert draft.count("## Source Table") == 1
+    assert draft.count("## Bibliography") == 1
+    assert "**Sources:** 2" in draft
+    source_table_idx = draft.index("## Source Table")
+    bibliography_idx = draft.index("## Bibliography")
+    assert "New source | https://example.com/new" in draft[source_table_idx:bibliography_idx]
+    assert "New source. [https://example.com/new]" in draft[bibliography_idx:]
+
+
 def test_revision_mode_change_notes_empty_when_marker_absent(monkeypatch):
     """If the LLM omits the 'Changes made' section, writer_change_notes is ''
     and the draft still assembles normally."""

@@ -48,19 +48,30 @@ attempts - handle by documenting the limitation honestly):
 NEW EVIDENCE SINCE THE PREVIOUS DRAFT (empty if none):
 {new_evidence}
 
-PREVIOUS DRAFT (revise this exact text; keep its header, source table, and
-bibliography intact - edit the body only):
+PREVIOUS DRAFT (reference for what to revise - the report header, source
+table, and bibliography are rebuilt automatically by the system and must NOT
+be repeated or echoed in your response; revise the report body only):
 {previous_draft}
 
 Rules:
 1. Address every open item explicitly. Integrate new evidence where it
    resolves an item. Fix structure, claims, and citations as the items demand.
-2. For evidence_exhausted items, do not fabricate support; add a brief,
-   honest note about the limitation where the item applies.
+2. NEVER fabricate citations or claims. This applies to every item, not only
+   evidence_exhausted ones: if the available evidence does not let you fully
+   satisfy an item, say so in the "Changes made" section and mark it
+   "partially addressed" or "documented as a gap" rather than inventing
+   support. For evidence_exhausted items, add a brief, honest note about the
+   limitation where the item applies.
 3. Do NOT pad. Do not exceed roughly 125% of the previous draft's body
    length unless new evidence genuinely requires it. Do not rewrite sections
    untouched by any item.
-4. End your response with a section "Changes made" listing each item and its
-   disposition (resolved / partially addressed / documented as a gap), one
-   line per item.
+4. Do NOT repeat or echo the header, source table, or bibliography: those
+   sections are rebuilt automatically by the system. Your response must
+   contain ONLY the revised report body.
+5. End your response with a section "Changes made" listing each item and its
+   disposition. Each line must begin by restating the exact item it refers
+   to, using the bracketed category and text as listed in REVIEW ITEMS
+   above, then its disposition (resolved / partially addressed / documented
+   as a gap) and a short note, e.g.:
+   - [blocking] <exact item text>: resolved - integrated the new source.
 """
