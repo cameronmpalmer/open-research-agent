@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 
 from ora.config import get_llm, get_researcher_model, load_config
 from ora.progress import emit_progress
-from ora.prompts import GAP_QUERY_PROMPT
+from ora.prompts import GAP_QUERY_PROMPT, ITEM_GAP_QUERY_PROMPT
 from ora.state import Finding, ResearchState, Source
 
 # Domains known to block or heavily rate-limit automated scraping.
@@ -318,6 +318,57 @@ def generate_gap_queries_dynamic(
     return queries[:count]
 
 
+def _fresh(queries, executed_queries: set[str]) -> list[str]:
+    """Deduplicate a query list against executed queries."""
+    return [q for q in queries if q not in executed_queries]
+
+
+def generate_gap_queries_for_items(
+    query: str,
+    intensity: int,
+    items: list[dict],
+    executed_queries: set[str],
+    config: RunnableConfig | None = None,
+) -> list[str]:
+    """Generate per-item gap queries for open review items.
+
+    Falls back to generate_gap_queries_dynamic when there are no open
+    blocking/required items (first-pass behavior) or the LLM fails.
+    """
+    open_items = [i for i in items if i.get("status") == "open"]
+    if not open_items or intensity < 3:
+        return generate_gap_queries_dynamic(query, intensity, [], "", executed_queries, config)
+
+    count = {3: 6, 4: 9, 5: 12}.get(intensity, 6)
+    item_lines = "\n".join(f"- [{i['category']}] {i['text']}" for i in open_items[:6])
+    executed_sorted = sorted(executed_queries)
+    already_run = "\n".join(f"- {q}" for q in executed_sorted[-30:]) or "(none yet)"
+
+    try:
+        settings = load_config()
+        llm = get_llm(get_researcher_model(settings), temperature=0.8)
+        response = llm.invoke(
+            ITEM_GAP_QUERY_PROMPT.format(
+                review_items=item_lines,
+                already_run=already_run,
+                count=count,
+            )
+        )
+        text = response.content if hasattr(response, "content") else str(response)
+    except Exception:  # noqa: BLE001
+        emit_progress(
+            config, "Researcher: item gap query LLM failed, using defaults", kind="warning"
+        )
+        return generate_gap_queries_dynamic(query, intensity, [], "", executed_queries, config)
+
+    queries = []
+    for line in text.strip().split("\n"):
+        line = line.strip().lstrip("-*0123456789. ")  # mirrors existing parse tolerance
+        if line and len(line) > 4 and line not in queries:
+            queries.append(line)
+    return _fresh(queries, executed_queries)
+
+
 def _scrape_and_collect(
     urls: list[str],
     params: dict,
@@ -490,6 +541,24 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
     # Reviewer feedback for targeted gap queries.
     reviewer_feedback = _format_reviewer_feedback(state)
     revise_round = bool(reviewer_feedback)
+    # Pass-level marker: revise_round is cleared after the first loop round
+    # (it only forces one extra evidence round when min_sources is already
+    # met), but the post-loop exhaustion rule below needs to know the whole
+    # pass was a review-driven revise.
+    revise_pass = bool(reviewer_feedback)
+
+    # Structured open review items from the last reviewer verdict. When any
+    # exist, gap queries target each item instead of the flat dynamic
+    # generator; items stay "open" until this pass either finds evidence for
+    # them or exhausts them below.
+    open_items = [i for i in state.get("review_items") or [] if i.get("status") == "open"]
+
+    # Baseline for this pass's deltas. sources/findings are appended to in
+    # place by _scrape_and_collect inside the loop, so lengths captured here
+    # (before the loop) are the correct baseline for the counts returned as
+    # last_round_new_sources/last_round_new_findings.
+    start_sources = len(sources)
+    start_findings = len(findings)
 
     round_num = 0
 
@@ -510,14 +579,25 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
         else:
             # Dynamic gap queries using LLM: adapt to what's been found and
             # what the reviewer flagged. Falls back to templates on failure.
-            queries_for_round = generate_gap_queries_dynamic(
-                query=query,
-                intensity=intensity,
-                sources=sources,
-                reviewer_feedback=reviewer_feedback,
-                executed_queries=executed_q_set,
-                config=config,
-            )
+            # With structured open review items, target each item instead;
+            # the no-items path stays exactly the original dynamic call.
+            if open_items:
+                queries_for_round = generate_gap_queries_for_items(
+                    query=query,
+                    intensity=intensity,
+                    items=open_items,
+                    executed_queries=executed_q_set,
+                    config=config,
+                )
+            else:
+                queries_for_round = generate_gap_queries_dynamic(
+                    query=query,
+                    intensity=intensity,
+                    sources=sources,
+                    reviewer_feedback=reviewer_feedback,
+                    executed_queries=executed_q_set,
+                    config=config,
+                )
 
         # Filter out queries already executed in any prior invocation.
         fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
@@ -529,16 +609,36 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
                 "Researcher: all gap queries were duplicates, regenerating...",
                 kind="warning",
             )
-            queries_for_round = generate_gap_queries_dynamic(
-                query=query,
-                intensity=intensity,
-                sources=sources,
-                reviewer_feedback=reviewer_feedback,
-                executed_queries=executed_q_set,
-                config=config,
-            )
+            if open_items:
+                queries_for_round = generate_gap_queries_for_items(
+                    query=query,
+                    intensity=intensity,
+                    items=open_items,
+                    executed_queries=executed_q_set,
+                    config=config,
+                )
+            else:
+                queries_for_round = generate_gap_queries_dynamic(
+                    query=query,
+                    intensity=intensity,
+                    sources=sources,
+                    reviewer_feedback=reviewer_feedback,
+                    executed_queries=executed_q_set,
+                    config=config,
+                )
             fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
             if not fresh_queries:
+                if revise_round and open_items:
+                    # A revise pass with open items and nothing new to try:
+                    # stop instead of falling back to generic templates so the
+                    # writer/reviewer can close the loop (the whole pass is
+                    # judged by the exhaustion rule after the loop).
+                    emit_progress(
+                        config,
+                        "Researcher: no fresh queries for open review items, ending revise pass",
+                        kind="warning",
+                    )
+                    break
                 # LLM regeneration produced only duplicates -- fall back
                 # to template-based gap queries as a last resort.
                 queries_for_round = generate_gap_queries(query, intensity)
@@ -625,6 +725,20 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
         if revise_round:
             revise_round = False
 
+    # Exhaustion rule: if this was a review-driven revise pass with open
+    # items and the WHOLE pass produced zero new sources, no item could be
+    # advanced. Mark every still-open item evidence_exhausted so the writer
+    # documents the gap honestly and the reviewer stops REVISE-ing for it.
+    # Attribution is intentionally coarse (whole-pass, not per-item): gap
+    # queries are generated per item, but scraped evidence is collected into
+    # one shared pool, so a source cannot be reliably assigned to the item
+    # that motivated it.
+    review_items = state.get("review_items") or []
+    if revise_pass and open_items and (len(sources) - start_sources) == 0:
+        for item in review_items:
+            if item.get("status") == "open":
+                item["status"] = "evidence_exhausted"
+
     if not findings:
         results_text = web_search.invoke({"query": query})
         findings.append(
@@ -650,4 +764,7 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
         "findings": findings[prior_finding_count:],
         "research_status": research_status,
         "messages": ["\n".join(log)],
+        "review_items": review_items,
+        "last_round_new_sources": len(sources) - start_sources,
+        "last_round_new_findings": len(findings) - start_findings,
     }
