@@ -53,6 +53,28 @@ class TestLoadConfig:
             assert config.limits.max_revisions == 5
             os.unlink(f.name)
 
+    def test_yaml_llm_bounds_surface_on_settings(self, monkeypatch):
+        monkeypatch.delenv("ORA_LLM_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.delenv("ORA_LLM_MAX_RETRIES", raising=False)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("llm_timeout_seconds: 42.5\nllm_max_retries: 0\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.llm_timeout_seconds == 42.5
+            assert config.llm_max_retries == 0
+            os.unlink(f.name)
+
+    def test_yaml_without_llm_bounds_uses_defaults(self, monkeypatch):
+        monkeypatch.delenv("ORA_LLM_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.delenv("ORA_LLM_MAX_RETRIES", raising=False)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("limits:\n  max_revisions: 3\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.llm_timeout_seconds == 300.0
+            assert config.llm_max_retries == 2
+            os.unlink(f.name)
+
     def test_get_researcher_model_defaults_to_default(self):
         settings = ORASettings()
         assert get_researcher_model(settings) == "deepseek-v4-flash"
@@ -183,6 +205,9 @@ def test_get_llm_passes_timeout_and_retries(monkeypatch):
     monkeypatch.setattr("langchain_openai.ChatOpenAI", fake_chat_openai)
     monkeypatch.setattr("ora.config.load_config", lambda *a, **kw: ORASettings())
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    # Clear ambient ORA_LLM_* so an exported value cannot override the defaults.
+    monkeypatch.delenv("ORA_LLM_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("ORA_LLM_MAX_RETRIES", raising=False)
 
     ora.config.get_llm("deepseek/deepseek-v4-flash", temperature=0)
 
@@ -204,6 +229,10 @@ def test_get_llm_honours_configured_timeout_and_retries(monkeypatch):
     settings.llm_max_retries = 0
     monkeypatch.setattr("ora.config.load_config", lambda *a, **kw: settings)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    # Ambient ORA_LLM_* cannot affect this test (attributes are set directly),
+    # but clear them so the test reads the same regardless of the environment.
+    monkeypatch.delenv("ORA_LLM_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("ORA_LLM_MAX_RETRIES", raising=False)
 
     ora.config.get_llm("deepseek/deepseek-v4-flash", temperature=0)
 

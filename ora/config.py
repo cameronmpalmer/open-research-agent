@@ -125,6 +125,10 @@ def load_config(config_path: str | None = None) -> ORASettings:
                 )
             if "deepseek_base_url" in yaml_data:
                 settings.deepseek_base_url = yaml_data["deepseek_base_url"]
+            if "llm_timeout_seconds" in yaml_data:
+                settings.llm_timeout_seconds = float(yaml_data["llm_timeout_seconds"])
+            if "llm_max_retries" in yaml_data:
+                settings.llm_max_retries = int(yaml_data["llm_max_retries"])
 
     return settings
 
@@ -274,7 +278,8 @@ def get_llm(model_name: str, temperature: float = 0.0):
         api_key=api_key,
         default_headers=provider.headers or None,
         # request_timeout is the canonical langchain-openai field ("timeout" is
-        # just its alias, and older versions only accept request_timeout).
+        # its alias); kept as request_timeout for compatibility with older
+        # langchain-openai releases.
         request_timeout=settings.llm_timeout_seconds,
         max_retries=settings.llm_max_retries,
     )

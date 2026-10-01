@@ -63,6 +63,9 @@ providers:
       HTTP-Referer: https://github.com/cameronmpalmer/open-research-agent
       X-Title: ORA
 
+# llm_timeout_seconds: 300.0   # optional; per-call read timeout (SDK default 600s)
+# llm_max_retries: 2           # optional; retries per LLM call
+
 # deepseek_base_url: https://api.deepseek.com   # legacy key, see below
 ```
 
@@ -141,6 +144,20 @@ A provider without a `base_url` is rejected with a clear error at call time.
 A model prefix naming a provider that is neither built in nor configured
 warns and falls back to the default provider.
 
+### LLM call bounds
+
+Top-level scalars that bound each LLM request. They apply to every provider
+and every agent call, so a stalled request cannot block a run indefinitely.
+
+| Key | Default | Purpose |
+|---|---|---|
+| `llm_timeout_seconds` | `300.0` | Read timeout for one LLM call. The OpenAI SDK default is 600s; 300s leaves headroom over the slowest observed legitimate call (~155s) while capping the worst case. |
+| `llm_max_retries` | `2` | Retries per LLM call after the first attempt. With the 300s timeout this bounds one logical call to roughly 15 minutes instead of the ~30 minutes the SDK defaults allow. |
+
+Both are honored from YAML and from their `ORA_` env-var forms
+(`ORA_LLM_TIMEOUT_SECONDS`, `ORA_LLM_MAX_RETRIES`); as everywhere else, a YAML
+key wins over its env var.
+
 ### Legacy: `deepseek_base_url`
 
 Before the `providers:` map existed, the DeepSeek base URL was a flat
@@ -182,6 +199,8 @@ Common examples:
 | `ORA_MODELS__DEFAULT` | `models.default` |
 | `ORA_PROVIDER__DEFAULT` | `provider.default` |
 | `ORA_DEEPSEEK_BASE_URL` | legacy `deepseek_base_url` |
+| `ORA_LLM_TIMEOUT_SECONDS` | `llm_timeout_seconds` |
+| `ORA_LLM_MAX_RETRIES` | `llm_max_retries` |
 | `ORA_LIMITS__MAX_REVISIONS` | `limits.max_revisions` |
 
 ## Provider routing
