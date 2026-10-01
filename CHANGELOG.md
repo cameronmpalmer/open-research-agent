@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+Search reliability and research throughput.
+
+- New `decodo` search provider (`search.provider: decodo`), using Decodo's Google
+  SERP API with automatic fallback to Firecrawl. Credentials come from
+  `DECODO_USERNAME` / `DECODO_PASSWORD`. Empty results are treated as an answer
+  and do not trigger the fallback; provider failures do.
+- Firecrawl search honors the `FIRECRAWL_API_URL` env override again, matching
+  scrape behavior and `CONFIG.md`.
+- Research now scrapes and extracts each query's URLs concurrently
+  (`ORA_RESEARCH_CONCURRENCY`, default 4). An intensity-4 run that previously
+  failed to finish in 45 minutes now completes in about 12 minutes with more
+  sources. Depth per intensity level is unchanged.
+- New `llm_timeout_seconds` (default 300) and `llm_max_retries` (default 2)
+  settings, settable in `config.yaml` or via `ORA_LLM_TIMEOUT_SECONDS` /
+  `ORA_LLM_MAX_RETRIES`. These bound each LLM call; previously the SDK defaults
+  applied (600s read, 2 retries), so a single stalled call could block a run for
+  about 30 minutes. See `CONFIG.md`.
+- Usage and cost accounting now works from concurrent workers.
+
 ## 0.1.0
 
 Initial public release of ORA.
