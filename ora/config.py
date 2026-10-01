@@ -16,6 +16,14 @@ class SearchSettings(BaseModel):
     provider: str = "firecrawl"
     firecrawl_api_key: str | None = None
     firecrawl_api_url: str = "https://api.firecrawl.com"
+    # Decodo SERP API (https://scraper-api.decodo.com/v2/scrape). Credentials are
+    # read from process env only, never from config.yaml.
+    decodo_api_url: str = "https://scraper-api.decodo.com/v2/scrape"
+    decodo_username_env: str = "DECODO_USERNAME"
+    decodo_password_env: str = "DECODO_PASSWORD"
+    decodo_domain: str = "com"
+    decodo_locale: str = "en-us"
+    fallback_to_firecrawl: bool = True
 
 
 class ModelSettings(BaseModel):
