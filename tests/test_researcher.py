@@ -291,3 +291,109 @@ class TestResearcherReviseLoop:
         assert len(gap_dynamic_calls) > 0, (
             "generate_gap_queries_dynamic should have been called via dedup regeneration"
         )
+
+
+"""Concurrency in _scrape_and_collect must not change results, order, or caps."""
+
+import threading
+
+import ora.agents.researcher as researcher_mod
+
+
+class _FakeTool:
+    """Minimal stand-in for a LangChain @tool object."""
+
+    def __init__(self, fn):
+        self._fn = fn
+
+    def invoke(self, payload):
+        return self._fn(payload)
+
+
+def _fake_extract(**kwargs):
+    return (
+        Source(url=kwargs["url"], title="", source_type="unknown"),
+        SourceExtraction(
+            summary="s", key_claims=["k1"], source_reliability="High"
+        ),
+    )
+
+
+def test_concurrent_scrape_keeps_order_and_overlaps(monkeypatch):
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "3")
+    active = {"now": 0, "max": 0}
+    lock = threading.Lock()
+
+    def fake_scrape(payload):
+        with lock:
+            active["now"] += 1
+            active["max"] = max(active["max"], active["now"])
+        import time
+
+        time.sleep(0.05)
+        with lock:
+            active["now"] -= 1
+        return f"# body {payload['url']}"
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", _fake_extract)
+
+    sources, findings, seen = [], [], set()
+    params = {"urls_per_query": 8, "scrapes_per_query": 8}
+    urls = [f"https://example.org/p{i}" for i in range(6)]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, params, 8000, None, [], sources, findings, seen, {},
+        min_sources=50, query="q", intensity=4, model_name="m",
+    )
+
+    assert done is False                      # 6 sources < min_sources=50
+    assert [s.url for s in sources] == urls   # submission order preserved
+    assert len(findings) == 6
+    assert active["max"] >= 2, "no overlap occurred; work is still sequential"
+    assert active["max"] <= 3, "concurrency knob not respected"
+
+
+def test_concurrent_scrape_stops_at_min_sources(monkeypatch):
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "2")
+
+    def fake_scrape(payload):
+        return f"# body {payload['url']}"
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", _fake_extract)
+
+    sources, findings, seen = [], [], set()
+    params = {"urls_per_query": 8, "scrapes_per_query": 8}
+    urls = [f"https://example.org/p{i}" for i in range(8)]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, params, 8000, None, [], sources, findings, seen, {},
+        min_sources=2, query="q", intensity=4, model_name="m",
+    )
+
+    assert done is True
+    assert len(sources) == 2
+
+
+def test_concurrent_scrape_respects_scrapes_per_query_cap(monkeypatch):
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "3")
+
+    def fake_scrape(payload):
+        return f"# body {payload['url']}"
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", _fake_extract)
+
+    sources, findings, seen = [], [], set()
+    params = {"urls_per_query": 8, "scrapes_per_query": 4}
+    urls = [f"https://example.org/p{i}" for i in range(6)]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, params, 8000, None, [], sources, findings, seen, {},
+        min_sources=50, query="q", intensity=4, model_name="m",
+    )
+
+    assert done is False
+    assert len(sources) == 4                  # per-query cap still enforced
+    assert [s.url for s in sources] == urls[:4]
