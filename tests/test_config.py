@@ -5,6 +5,7 @@ import tempfile
 
 import pytest
 
+import ora.config
 from ora.config import (
     ORASettings,
     get_llm,
@@ -168,6 +169,47 @@ class TestGetLlmRouting:
         )
         with pytest.raises(ValueError, match="base_url"):
             get_llm("custom:my-model")
+
+
+def test_get_llm_passes_timeout_and_retries(monkeypatch):
+    captured = {}
+
+    def fake_chat_openai(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    # get_llm imports ChatOpenAI lazily from langchain_openai, so patch there.
+    # Isolate load_config so a real ~/.ora/config.yaml cannot leak in.
+    monkeypatch.setattr("langchain_openai.ChatOpenAI", fake_chat_openai)
+    monkeypatch.setattr("ora.config.load_config", lambda *a, **kw: ORASettings())
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+
+    ora.config.get_llm("deepseek/deepseek-v4-flash", temperature=0)
+
+    assert captured["max_retries"] == 2
+    timeout = captured.get("timeout", captured.get("request_timeout"))
+    assert timeout == 300.0
+
+
+def test_get_llm_honours_configured_timeout_and_retries(monkeypatch):
+    captured = {}
+
+    def fake_chat_openai(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("langchain_openai.ChatOpenAI", fake_chat_openai)
+    settings = ORASettings()
+    settings.llm_timeout_seconds = 42.5
+    settings.llm_max_retries = 0
+    monkeypatch.setattr("ora.config.load_config", lambda *a, **kw: settings)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+
+    ora.config.get_llm("deepseek/deepseek-v4-flash", temperature=0)
+
+    assert captured["max_retries"] == 0
+    timeout = captured.get("timeout", captured.get("request_timeout"))
+    assert timeout == 42.5
 
 
 class TestSplitProvider:

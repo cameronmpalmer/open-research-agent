@@ -66,6 +66,13 @@ class ORASettings(BaseSettings):
     providers: dict[str, ProviderSettings] = Field(default_factory=dict)
     deepseek_base_url: str = "https://api.deepseek.com"  # legacy; kept for backward compat
 
+    # Per-call LLM bounds. Without these the OpenAI SDK defaults apply
+    # (read timeout 600s, max_retries=2), so a single stalled call can block
+    # a run for ~30 minutes. 300s leaves headroom over the slowest observed
+    # legitimate call (155s) while bounding the worst case.
+    llm_timeout_seconds: float = 300.0
+    llm_max_retries: int = 2
+
 
 DEFAULT_PROVIDERS: dict[str, ProviderSettings] = {
     "deepseek": ProviderSettings(
@@ -266,6 +273,10 @@ def get_llm(model_name: str, temperature: float = 0.0):
         base_url=provider.base_url,
         api_key=api_key,
         default_headers=provider.headers or None,
+        # request_timeout is the canonical langchain-openai field ("timeout" is
+        # just its alias, and older versions only accept request_timeout).
+        request_timeout=settings.llm_timeout_seconds,
+        max_retries=settings.llm_max_retries,
     )
 
     # When a usage collector is active (ora.usage.usage_collection), return a
