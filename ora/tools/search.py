@@ -2,43 +2,49 @@
 
 import json
 import os
-from base64 import b64encode
 
 import requests
 from langchain_core.tools import tool
 
-from ora.config import load_config
+from ora.config import SearchSettings, load_config
 
 _MAX_RESULTS = 5
 
 
-def _decodo_search(query: str, s, limit: int = _MAX_RESULTS) -> tuple[list[dict], str | None]:
+def _decodo_search(
+    query: str, settings: SearchSettings, limit: int = _MAX_RESULTS
+) -> tuple[list[dict], str | None]:
     """Return (results, error). results is [] on any failure."""
-    username = os.environ.get(s.decodo_username_env, "")
-    password = os.environ.get(s.decodo_password_env, "")
+    username = os.environ.get(settings.decodo_username_env, "")
+    password = os.environ.get(settings.decodo_password_env, "")
     if not username or not password:
-        return [], f"decodo credentials missing ({s.decodo_username_env}/{s.decodo_password_env})"
+        return [], (
+            f"decodo credentials missing "
+            f"({settings.decodo_username_env}/{settings.decodo_password_env})"
+        )
     body = json.dumps(
         {
             "target": "google_search",
             "query": query,
-            "domain": s.decodo_domain,
-            "locale": s.decodo_locale,
+            "domain": settings.decodo_domain,
+            "locale": settings.decodo_locale,
             "parse": True,
             "device_type": "desktop_chrome",
         }
     ).encode()
     try:
         resp = requests.post(
-            s.decodo_api_url,
+            settings.decodo_api_url,
             data=body,
             headers={
-                "Authorization": f"Basic {b64encode(f'{username}:{password}'.encode()).decode()}",
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             },
+            auth=(username, password),
             timeout=30,
         )
+        if resp.status_code >= 400:
+            return [], f"decodo HTTP {resp.status_code}"
         data = resp.json()
     except Exception as e:  # noqa: BLE001
         return [], f"decodo request failed: {e!s}"
@@ -47,8 +53,10 @@ def _decodo_search(query: str, s, limit: int = _MAX_RESULTS) -> tuple[list[dict]
         return [], f"decodo malformed response: {type(data).__name__}"
     if data.get("status") == "failed":
         return [], f"decodo status {data.get('status_code')}: {data.get('message')}"
+    if "results" not in data:
+        return [], "decodo malformed response: no results key"
 
-    entries = data.get("results", [])
+    entries = data["results"]
     if not isinstance(entries, list):
         return [], f"decodo malformed results: {type(entries).__name__}"
 
@@ -59,6 +67,8 @@ def _decodo_search(query: str, s, limit: int = _MAX_RESULTS) -> tuple[list[dict]
         content = entry.get("content") or {}
         if not isinstance(content, dict):
             continue
+        # Decodo's parse:true response is documented to nest organic results
+        # sometimes one level deep and sometimes two, so accept either shape.
         outer = content.get("results") or {}
         if not isinstance(outer, dict):
             outer = {}
@@ -78,14 +88,19 @@ def _decodo_search(query: str, s, limit: int = _MAX_RESULTS) -> tuple[list[dict]
     return out[:limit], None
 
 
-def _firecrawl_search(query: str, s, limit: int = _MAX_RESULTS) -> tuple[list[dict], str | None]:
+def _firecrawl_search(
+    query: str, settings: SearchSettings, limit: int = _MAX_RESULTS
+) -> tuple[list[dict], str | None]:
+    url = os.environ.get("FIRECRAWL_API_URL", settings.firecrawl_api_url)
     try:
         resp = requests.post(
-            f"{s.firecrawl_api_url}/v1/search",
+            f"{url}/v1/search",
             json={"query": query, "limit": limit},
             headers={"Content-Type": "application/json"},
             timeout=30,
         )
+        if resp.status_code >= 400:
+            return [], f"firecrawl HTTP {resp.status_code}"
         data = resp.json()
     except Exception as e:  # noqa: BLE001
         return [], f"firecrawl request failed: {e!s}"
@@ -93,7 +108,9 @@ def _firecrawl_search(query: str, s, limit: int = _MAX_RESULTS) -> tuple[list[di
         return [], f"firecrawl malformed response: {type(data).__name__}"
     if not data.get("success"):
         return [], f"firecrawl search failed: {data}"
-    items = data.get("data") or []
+    if "data" not in data:
+        return [], "firecrawl malformed response: no data key"
+    items = data["data"]
     if not isinstance(items, list):
         return [], f"firecrawl malformed data: {type(items).__name__}"
     out = [
