@@ -14,8 +14,9 @@ payload's ``cost`` field when the provider reports it (OpenRouter does;
 DeepSeek does not), otherwise the run is marked as cost-unknown.
 """
 
+import threading
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 _current_collector: ContextVar[Optional["UsageCollector"]] = ContextVar(
@@ -36,6 +37,9 @@ class UsageCollector:
         "prompt_cache_hit_tokens",
         "cache_read",
     )
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, repr=False, compare=False
+    )
 
     def record(self, response: Any) -> None:
         """Record usage from an LLM response (AIMessage or similar)."""
@@ -44,10 +48,6 @@ class UsageCollector:
         output_tokens = int(usage_metadata.get("output_tokens") or 0)
         if input_tokens == 0 and output_tokens == 0:
             return
-
-        self.input_tokens += input_tokens
-        self.output_tokens += output_tokens
-        self.calls += 1
 
         # Cached input tokens: usage_metadata detail, then raw payload keys.
         details = usage_metadata.get("input_token_details") or {}
@@ -59,15 +59,22 @@ class UsageCollector:
                 if value is not None:
                     cached = int(value)
                     break
-        self.cached_tokens += cached
 
         # Provider-reported cost (USD), e.g. OpenRouter's usage.cost.
         raw = self._raw_usage(response)
         cost = raw.get("cost")
-        if cost is None:
-            self.cost_known = False
-        else:
-            self.cost += float(cost)
+
+        # Worker threads record into a shared collector, so the counter
+        # updates must be atomic to avoid lost updates.
+        with self._lock:
+            self.input_tokens += input_tokens
+            self.output_tokens += output_tokens
+            self.calls += 1
+            self.cached_tokens += cached
+            if cost is None:
+                self.cost_known = False
+            else:
+                self.cost += float(cost)
 
     @staticmethod
     def _raw_usage(response: Any) -> dict:

@@ -1,5 +1,6 @@
 """Researcher agent node for LangGraph."""
 
+import contextvars
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -468,9 +469,9 @@ def _scrape_and_extract_one(
     out["events"].append(
         (f"Researcher: scraped {len(content)} chars from {display_url}", "success")
     )
-    content = content[:max_content_chars]
 
     try:
+        content = content[:max_content_chars]
         if intensity >= 3:
             source, extraction = extract_and_evaluate(
                 url=url,
@@ -580,10 +581,13 @@ def _scrape_and_collect(
         for url in chunk:
             display_url = url.replace("https://", "").replace("http://", "")[:80]
             emit_progress(config, f"Researcher: scraping {display_url}", kind="scrape")
-        results: list[dict] = []
+        results: list[tuple[int, dict]] = []
         with ThreadPoolExecutor(max_workers=len(chunk)) as pool:
+            # Copy the submitting context per task so workers inherit the
+            # active UsageCollector (ContextVars are not shared across threads).
             futures = {
                 pool.submit(
+                    contextvars.copy_context().run,
                     _scrape_and_extract_one,
                     url,
                     _normalize_url_for_dedupe(url),
@@ -593,16 +597,15 @@ def _scrape_and_collect(
                     intensity,
                     model_name,
                     config,
-                ): url
-                for url in chunk
+                ): index
+                for index, url in enumerate(chunk)
             }
             for fut in as_completed(futures):
-                results.append(fut.result())
+                results.append((futures[fut], fut.result()))
 
-        order = {u: i for i, u in enumerate(chunk)}
-        results.sort(key=lambda r: order.get(r["url"], 0))
+        results.sort(key=lambda item: item[0])
 
-        for r in results:
+        for _, r in results:
             log.extend(r["log"])
             for message, kind in r["events"]:
                 emit_progress(config, message, kind=kind)

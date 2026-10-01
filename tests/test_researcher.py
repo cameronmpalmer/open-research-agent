@@ -1,5 +1,8 @@
 """Tests for researcher agent."""
 
+import threading
+
+import ora.agents.researcher as researcher_mod
 from ora.agents.researcher import _normalize_url_for_dedupe, generate_search_queries
 from ora.state import Finding, ResearchState, Source, SourceExtraction
 
@@ -293,11 +296,7 @@ class TestResearcherReviseLoop:
         )
 
 
-"""Concurrency in _scrape_and_collect must not change results, order, or caps."""
-
-import threading
-
-import ora.agents.researcher as researcher_mod
+# Concurrency in _scrape_and_collect must not change results, order, or caps.
 
 
 class _FakeTool:
@@ -428,3 +427,128 @@ def test_concurrent_scrape_cap_guard_prevents_batch_overshoot(monkeypatch):
     assert done is False
     assert len(sources) == 4
     assert [s.url for s in sources] == urls[:4]
+
+
+class _FakeUsageResponse:
+    """Minimal LLM response carrying token usage for UsageCollector.record."""
+
+    def __init__(self):
+        self.usage_metadata = {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "input_token_details": {"cache_read": 0},
+        }
+        self.response_metadata = {"token_usage": {"cost": 0.001}}
+
+
+def test_concurrent_scrape_worker_failure_does_not_abort_batch(monkeypatch):
+    """A scrape that raises for one URL must not abort the whole batch."""
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "3")
+
+    def fake_scrape(payload):
+        if payload["url"].endswith("/p1"):
+            raise RuntimeError("boom")
+        return f"# body {payload['url']}"
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", _fake_extract)
+
+    sources, findings, seen = [], [], set()
+    urls = [f"https://example.org/p{i}" for i in range(3)]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
+        sources, findings, seen, {}, min_sources=50, query="q", intensity=4,
+        model_name="m",
+    )
+
+    assert done is False
+    assert [s.url for s in sources] == [
+        "https://example.org/p0",
+        "https://example.org/p2",
+    ]
+    assert len(findings) == 2
+
+
+def test_concurrent_scrape_filters_intra_batch_duplicates(monkeypatch):
+    """The same URL twice in one batch yields exactly one source."""
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "3")
+
+    def fake_scrape(payload):
+        return f"# body {payload['url']}"
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", _fake_extract)
+
+    sources, findings, seen = [], [], set()
+    urls = ["https://example.org/dup", "https://example.org/dup"]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
+        sources, findings, seen, {}, min_sources=50, query="q", intensity=4,
+        model_name="m",
+    )
+
+    assert done is False
+    assert len(sources) == 1
+    assert len(findings) == 1
+    assert len(seen) == 1
+
+
+def test_research_concurrency_env_parsing(monkeypatch):
+    monkeypatch.delenv("ORA_RESEARCH_CONCURRENCY", raising=False)
+    assert researcher_mod._research_concurrency() == 4
+
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "8")
+    assert researcher_mod._research_concurrency() == 8
+
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "0")
+    assert researcher_mod._research_concurrency() == 1
+
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "-5")
+    assert researcher_mod._research_concurrency() == 1
+
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "not-an-int")
+    assert researcher_mod._research_concurrency() == 4
+
+
+def test_usage_collection_survives_concurrency(monkeypatch):
+    """Workers must inherit the run's active UsageCollector."""
+    from ora.usage import UsageCollector, active_collector, usage_collection
+
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "3")
+    observed = []
+
+    def fake_scrape(payload):
+        return f"# body {payload['url']}"
+
+    def fake_extract(**kwargs):
+        collector = active_collector()
+        observed.append(collector)
+        if collector is not None:
+            collector.record(_FakeUsageResponse())
+        return (
+            Source(url=kwargs["url"], title="", source_type="unknown"),
+            SourceExtraction(
+                summary="s", key_claims=["k1"], source_reliability="High"
+            ),
+        )
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", fake_extract)
+
+    collector = UsageCollector()
+    urls = [f"https://example.org/p{i}" for i in range(4)]
+    sources, findings, seen = [], [], set()
+    with usage_collection(collector):
+        researcher_mod._scrape_and_collect(
+            urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
+            sources, findings, seen, {}, min_sources=50, query="q", intensity=4,
+            model_name="m",
+        )
+
+    assert len(sources) == 4
+    assert observed and all(c is collector for c in observed), (
+        "worker thread lost the active UsageCollector"
+    )
+    assert collector.calls == 4
