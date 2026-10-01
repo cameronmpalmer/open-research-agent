@@ -114,6 +114,76 @@ def test_no_results_returns_explicit_message(monkeypatch):
     assert "No search results found" in out
 
 
+def test_decodo_empty_results_do_not_trigger_fallback(monkeypatch):
+    """Decodo succeeding with zero results is an answer, not a failure.
+
+    Fallback must NOT run even when fallback_to_firecrawl is enabled.
+    """
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
+    monkeypatch.setenv("DECODO_USERNAME", "u")
+    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    called = []
+
+    def fake_post(url, **kw):
+        called.append(url)
+        return FakeResp({"results": []})
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    out = search_mod._search("q", 5)
+    assert "No search results found" in out
+    assert all("/v1/search" not in u for u in called), f"fallback fired: {called}"
+
+
+def test_limit_is_respected(monkeypatch):
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings())
+    monkeypatch.setenv("DECODO_USERNAME", "u")
+    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    payload = {
+        "results": [
+            {
+                "content": {
+                    "results": {
+                        "organic": [
+                            {"title": "A", "url": "https://a.example", "description": "a"},
+                            {"title": "B", "url": "https://b.example", "description": "b"},
+                            {"title": "C", "url": "https://c.example", "description": "c"},
+                        ]
+                    }
+                }
+            }
+        ]
+    }
+    monkeypatch.setattr(search_mod.requests, "post", lambda url, **kw: FakeResp(payload))
+    out = search_mod._search("q", 2)
+    assert out.count("https://") == 2
+    assert "https://c.example" not in out
+
+
+def test_malformed_payload_returns_error_not_raise(monkeypatch):
+    monkeypatch.setenv("DECODO_USERNAME", "u")
+    monkeypatch.setenv("DECODO_PASSWORD", "p")
+
+    # Decodo path.
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=False))
+    for payload in (None, []):
+        monkeypatch.setattr(
+            search_mod.requests, "post", lambda url, _payload=payload, **kw: FakeResp(_payload)
+        )
+        out = search_mod._search("q", 5)
+        assert out.startswith("Search error:"), f"decodo payload={payload!r} -> {out!r}"
+
+    # Firecrawl path must harden against non-dict bodies too.
+    monkeypatch.setattr(
+        search_mod, "load_config", lambda: _settings(provider="firecrawl", fallback=False)
+    )
+    for payload in (None, []):
+        monkeypatch.setattr(
+            search_mod.requests, "post", lambda url, _payload=payload, **kw: FakeResp(_payload)
+        )
+        out = search_mod._search("q", 5)
+        assert out.startswith("Search error:"), f"firecrawl payload={payload!r} -> {out!r}"
+
+
 class TestSearchTool:
     def test_tool_has_name(self):
         assert web_search.name == "web_search"

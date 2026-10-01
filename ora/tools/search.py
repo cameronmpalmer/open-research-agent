@@ -12,7 +12,7 @@ from ora.config import load_config
 _MAX_RESULTS = 5
 
 
-def _decodo_search(query: str, s) -> tuple[list[dict], str | None]:
+def _decodo_search(query: str, s, limit: int = _MAX_RESULTS) -> tuple[list[dict], str | None]:
     """Return (results, error). results is [] on any failure."""
     username = os.environ.get(s.decodo_username_env, "")
     password = os.environ.get(s.decodo_password_env, "")
@@ -43,15 +43,31 @@ def _decodo_search(query: str, s) -> tuple[list[dict], str | None]:
     except Exception as e:  # noqa: BLE001
         return [], f"decodo request failed: {e!s}"
 
+    if not isinstance(data, dict):
+        return [], f"decodo malformed response: {type(data).__name__}"
     if data.get("status") == "failed":
         return [], f"decodo status {data.get('status_code')}: {data.get('message')}"
 
+    entries = data.get("results", [])
+    if not isinstance(entries, list):
+        return [], f"decodo malformed results: {type(entries).__name__}"
+
     out: list[dict] = []
-    for entry in data.get("results", []):
-        content = entry.get("content", {}) or {}
-        outer = content.get("results", {}) or {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        content = entry.get("content") or {}
+        if not isinstance(content, dict):
+            continue
+        outer = content.get("results") or {}
+        if not isinstance(outer, dict):
+            outer = {}
         organic = outer.get("organic") or content.get("organic") or []
-        for item in organic[:_MAX_RESULTS]:
+        if not isinstance(organic, list):
+            continue
+        for item in organic[:limit]:
+            if not isinstance(item, dict):
+                continue
             out.append(
                 {
                     "title": item.get("title", ""),
@@ -59,29 +75,35 @@ def _decodo_search(query: str, s) -> tuple[list[dict], str | None]:
                     "description": item.get("description", ""),
                 }
             )
-    return out[:_MAX_RESULTS], None
+    return out[:limit], None
 
 
-def _firecrawl_search(query: str, s) -> tuple[list[dict], str | None]:
+def _firecrawl_search(query: str, s, limit: int = _MAX_RESULTS) -> tuple[list[dict], str | None]:
     try:
         resp = requests.post(
             f"{s.firecrawl_api_url}/v1/search",
-            json={"query": query, "limit": _MAX_RESULTS},
+            json={"query": query, "limit": limit},
             headers={"Content-Type": "application/json"},
             timeout=30,
         )
         data = resp.json()
     except Exception as e:  # noqa: BLE001
         return [], f"firecrawl request failed: {e!s}"
+    if not isinstance(data, dict):
+        return [], f"firecrawl malformed response: {type(data).__name__}"
     if not data.get("success"):
         return [], f"firecrawl search failed: {data}"
+    items = data.get("data") or []
+    if not isinstance(items, list):
+        return [], f"firecrawl malformed data: {type(items).__name__}"
     out = [
         {
             "title": item.get("title", ""),
             "url": item.get("url", ""),
             "description": item.get("description", ""),
         }
-        for item in (data.get("data") or [])[:_MAX_RESULTS]
+        for item in items[:limit]
+        if isinstance(item, dict)
     ]
     return out, None
 
@@ -108,20 +130,20 @@ def _search(query: str, limit: int = _MAX_RESULTS) -> str:
     s = load_config()
     provider = (s.search.provider or "firecrawl").lower()
     if provider == "decodo":
-        results, err = _decodo_search(query, s.search)
+        results, err = _decodo_search(query, s.search, limit)
         if results:
             return _format(results)
         if err is None:
             return "No search results found."
         if not s.search.fallback_to_firecrawl:
             return f"Search error: {err}"
-        fb, fb_err = _firecrawl_search(query, s.search)
+        fb, fb_err = _firecrawl_search(query, s.search, limit)
         if fb:
             return _format(fb)
         if fb_err is None:
             return "No search results found."
         return f"Search error: decodo={err}; firecrawl={fb_err}"
-    results, err = _firecrawl_search(query, s.search)
+    results, err = _firecrawl_search(query, s.search, limit)
     if results:
         return _format(results)
     if err is None:
