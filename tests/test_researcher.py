@@ -328,11 +328,14 @@ def test_concurrent_scrape_keeps_order_and_overlaps(monkeypatch):
         with lock:
             active["now"] += 1
             active["max"] = max(active["max"], active["now"])
-        import time
+        try:
+            import time
 
-        time.sleep(0.05)
-        with lock:
-            active["now"] -= 1
+            index = int(payload["url"].rstrip("/").rsplit("p", 1)[1])
+            time.sleep(0.06 - 0.01 * index)  # p5 finishes before p0
+        finally:
+            with lock:
+                active["now"] -= 1
         return f"# body {payload['url']}"
 
     monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
@@ -396,4 +399,32 @@ def test_concurrent_scrape_respects_scrapes_per_query_cap(monkeypatch):
 
     assert done is False
     assert len(sources) == 4                  # per-query cap still enforced
+    assert [s.url for s in sources] == urls[:4]
+
+
+def test_concurrent_scrape_cap_guard_prevents_batch_overshoot(monkeypatch):
+    """The cap must hold when it is hit exactly at a batch boundary.
+
+    Without the outer scraped_this_query guard, the next batch is still
+    submitted and one extra source is appended (4 -> 5).
+    """
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "2")
+
+    def fake_scrape(payload):
+        return f"# body {payload['url']}"
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", _fake_extract)
+
+    sources, findings, seen = [], [], set()
+    params = {"urls_per_query": 8, "scrapes_per_query": 4}
+    urls = [f"https://example.org/p{i}" for i in range(6)]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, params, 8000, None, [], sources, findings, seen, {},
+        min_sources=50, query="q", intensity=4, model_name="m",
+    )
+
+    assert done is False
+    assert len(sources) == 4
     assert [s.url for s in sources] == urls[:4]

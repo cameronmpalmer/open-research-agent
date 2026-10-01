@@ -452,6 +452,11 @@ def _scrape_and_extract_one(
         out["events"].append((f"Researcher: scrape failed for {display_url}", "error"))
         return out
 
+    # Coerce defensively so a non-str tool return cannot raise below and
+    # abort the whole batch via fut.result().
+    if not isinstance(content, str):
+        content = str(content)
+
     is_error = content.startswith(("Scrape error", "Scrape failed", "No content extracted"))
     out["log"].append(
         f"  Scraped: {len(content)} chars from {url[:60]} {'(FAIL)' if is_error else ''}"
@@ -572,6 +577,9 @@ def _scrape_and_collect(
             f"Researcher: scraping {len(chunk)} pages concurrently",
             kind="scrape",
         )
+        for url in chunk:
+            display_url = url.replace("https://", "").replace("http://", "")[:80]
+            emit_progress(config, f"Researcher: scraping {display_url}", kind="scrape")
         results: list[dict] = []
         with ThreadPoolExecutor(max_workers=len(chunk)) as pool:
             futures = {
