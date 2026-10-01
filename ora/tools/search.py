@@ -67,14 +67,28 @@ def _decodo_search(
         content = entry.get("content") or {}
         if not isinstance(content, dict):
             continue
-        # Decodo's parse:true response is documented to nest organic results
-        # sometimes one level deep and sometimes two, so accept either shape.
+        # Decodo's parse:true response nests organic results by depth, and the
+        # live API (verified 2026-10-01) uses the two-level shape
+        # content.results.results.organic. Older/other responses use a single
+        # level (content.results.organic) or put organic directly on content,
+        # so accept all three, preferring the deeper (live) shape.
         outer = content.get("results") or {}
         if not isinstance(outer, dict):
             outer = {}
-        organic = outer.get("organic") or content.get("organic") or []
+        inner = outer.get("results")
+        organic: object = None
+        for candidate in (
+            inner.get("organic") if isinstance(inner, dict) else None,
+            outer.get("organic"),
+            content.get("organic"),
+        ):
+            if isinstance(candidate, list) and candidate:
+                organic = candidate  # first non-empty list wins
+                break
+            if organic is None and isinstance(candidate, list):
+                organic = candidate  # remember an empty list as zero results
         if not isinstance(organic, list):
-            continue
+            organic = []
         for item in organic[:limit]:
             if not isinstance(item, dict):
                 continue
@@ -82,7 +96,9 @@ def _decodo_search(
                 {
                     "title": item.get("title", ""),
                     "url": item.get("url", ""),
-                    "description": item.get("description", ""),
+                    # Live Decodo organic items use "desc"; some fixtures and
+                    # fallback shapes use "description".
+                    "description": item.get("description") or item.get("desc") or "",
                 }
             )
     return out[:limit], None

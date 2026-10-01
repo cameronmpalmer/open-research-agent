@@ -57,6 +57,44 @@ def test_decodo_results_are_formatted(monkeypatch):
     assert calls["body"]["target"] == "google_search"
 
 
+DECODO_LIVE = {
+    "results": [
+        {
+            "content": {
+                "results": {
+                    "results": {
+                        "organic": [
+                            {
+                                "title": "Live A",
+                                "url": "https://live.example/1",
+                                "desc": "live alpha",
+                            }
+                        ]
+                    },
+                    "errors": [],
+                }
+            }
+        }
+    ]
+}
+
+
+def test_decodo_live_two_level_nesting_uses_desc(monkeypatch):
+    """Live 2026-10-01 shape: content.results.results.organic with a `desc` field.
+
+    The single-level fixture above does not match the live Decodo response; this
+    guards the deeper nesting and the `desc` description key actually returned.
+    """
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings())
+    monkeypatch.setenv("DECODO_USERNAME", "u")
+    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setattr(search_mod.requests, "post", lambda url, **kw: FakeResp(DECODO_LIVE))
+    out = search_mod._search("q", 5)
+    assert "https://live.example/1" in out
+    assert "Live A" in out
+    assert "live alpha" in out
+
+
 def test_decodo_missing_credentials_falls_back_to_firecrawl(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings())
     monkeypatch.delenv("DECODO_USERNAME", raising=False)
