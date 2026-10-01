@@ -69,7 +69,8 @@ class ORASettings(BaseSettings):
     # Per-call LLM bounds. Without these the OpenAI SDK defaults apply
     # (read timeout 600s, max_retries=2), so a single stalled call can block
     # a run for ~30 minutes. 300s leaves headroom over the slowest observed
-    # legitimate call (155s) while bounding the worst case.
+    # legitimate call (155s); with max_retries=2 the worst case for one
+    # logical call is about 900s (3 attempts x 300s), not ~30 minutes.
     llm_timeout_seconds: float = 300.0
     llm_max_retries: int = 2
 
@@ -90,6 +91,20 @@ DEFAULT_PROVIDERS: dict[str, ProviderSettings] = {
 }
 
 
+def _merge_search(base: SearchSettings, overrides: dict) -> SearchSettings:
+    """Merge a YAML ``search:`` block over env/defaults field by field.
+
+    Replacing the whole block would silently discard env-provided values for
+    keys the YAML omits (e.g. a block with only ``firecrawl_api_url`` would
+    reset an env ``ORA_SEARCH__PROVIDER=decodo`` back to the default). Only the
+    keys actually present in the YAML block override, so YAML still wins for
+    the keys it defines.
+    """
+    data = base.model_dump()
+    data.update({key: value for key, value in overrides.items() if key in data})
+    return SearchSettings(**data)
+
+
 def load_config(config_path: str | None = None) -> ORASettings:
     """Load ORA configuration from YAML file and environment.
 
@@ -107,7 +122,7 @@ def load_config(config_path: str | None = None) -> ORASettings:
             if "models" in yaml_data:
                 settings.models = ModelSettings(**yaml_data["models"])
             if "search" in yaml_data:
-                settings.search = SearchSettings(**yaml_data["search"])
+                settings.search = _merge_search(settings.search, yaml_data["search"])
             if "output" in yaml_data:
                 settings.output = OutputSettings(**yaml_data["output"])
             if "limits" in yaml_data:

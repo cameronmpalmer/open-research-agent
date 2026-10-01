@@ -73,6 +73,39 @@ class TestLoadConfig:
             config = load_config(f.name)
             assert config.llm_timeout_seconds == 300.0
             assert config.llm_max_retries == 2
+
+    def test_yaml_search_block_preserves_env_provider(self, monkeypatch):
+        """A partial search: block must not clobber keys it omits.
+
+        Replacing the whole block silently reset an env ORA_SEARCH__PROVIDER
+        back to the default, so a block holding only firecrawl_api_url would
+        quietly disable Decodo.
+        """
+        monkeypatch.setenv("ORA_SEARCH__PROVIDER", "decodo")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("search:\n  firecrawl_api_url: http://fc.example:3002\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.search.provider == "decodo"
+            assert config.search.firecrawl_api_url == "http://fc.example:3002"
+            os.unlink(f.name)
+
+    def test_yaml_search_provider_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("ORA_SEARCH__PROVIDER", "decodo")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("search:\n  provider: firecrawl\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.search.provider == "firecrawl"
+            os.unlink(f.name)
+
+    def test_yaml_without_search_block_keeps_env_provider(self, monkeypatch):
+        monkeypatch.setenv("ORA_SEARCH__PROVIDER", "decodo")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("limits:\n  max_revisions: 3\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.search.provider == "decodo"
             os.unlink(f.name)
 
     def test_get_researcher_model_defaults_to_default(self):

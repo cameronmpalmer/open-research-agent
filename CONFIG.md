@@ -95,9 +95,26 @@ site bypasses the configured model.
 
 | Key | Default | Purpose |
 |---|---|---|
-| `search.provider` | `firecrawl` | Search and scrape backend |
+| `search.provider` | `firecrawl` | Search backend: `firecrawl` or `decodo`. Unrecognized values warn and fall back to `firecrawl`. |
 | `search.firecrawl_api_key` | (unset) | Firecrawl key; normally exported as `FIRECRAWL_API_KEY` instead |
 | `search.firecrawl_api_url` | `https://api.firecrawl.com` | Firecrawl endpoint; set to `http://localhost:3002` for self-hosted Firecrawl (key optional there) |
+| `search.decodo_api_url` | `https://scraper-api.decodo.com/v2/scrape` | Decodo SERP endpoint (`target: google_search`) |
+| `search.decodo_username_env` | `DECODO_USERNAME` | Name of the env var holding the Decodo username |
+| `search.decodo_password_env` | `DECODO_PASSWORD` | Name of the env var holding the Decodo password |
+| `search.decodo_domain` | `com` | Google domain to search |
+| `search.decodo_locale` | `en-us` | Result locale |
+| `search.fallback_to_firecrawl` | `true` | On a Decodo *failure*, retry via Firecrawl |
+
+Decodo credentials are read from process env only and are never written to
+`config.yaml`; the two `*_env` settings name the variables to read. Enable
+Decodo with `search.provider: decodo` plus `DECODO_USERNAME` and
+`DECODO_PASSWORD` exported.
+
+The fallback is deliberate and narrow: a Decodo **failure** (bad credentials,
+HTTP error, provider-reported error, or a malformed body) retries via Firecrawl,
+but a successful search that simply found nothing is reported as
+`No search results found.` and does **not** retry, so a quiet query is not
+double-billed. Scrape always uses Firecrawl regardless of `search.provider`.
 
 ### output
 
@@ -182,6 +199,9 @@ var to use) and are not loaded from a `.env` file.
 | `OPENAI_API_KEY` | Legacy fallback for deepseek when `DEEPSEEK_API_KEY` is unset |
 | `FIRECRAWL_API_KEY` | Search/scrape; overrides `search.firecrawl_api_key` |
 | `FIRECRAWL_API_URL` | Search/scrape endpoint; overrides `search.firecrawl_api_url` |
+| `DECODO_USERNAME` | Decodo SERP username (needed when `search.provider: decodo`) |
+| `DECODO_PASSWORD` | Decodo SERP password (needed when `search.provider: decodo`) |
+| `ORA_RESEARCH_CONCURRENCY` | Parallel scrape+extract workers per query batch. Default `4`, clamped to a minimum of `1`, and capped by `scrapes_per_query`. Higher values finish research faster at the cost of more simultaneous Firecrawl and LLM requests. Not a `config.yaml` key. |
 
 ### ORA_ settings variables
 
@@ -198,6 +218,10 @@ Common examples:
 | `ORA_MODELS__SUPERVISOR` | `models.supervisor` |
 | `ORA_MODELS__DEFAULT` | `models.default` |
 | `ORA_PROVIDER__DEFAULT` | `provider.default` |
+| `ORA_SEARCH__PROVIDER` | `search.provider` |
+| `ORA_SEARCH__FIRECRAWL_API_URL` | `search.firecrawl_api_url` |
+| `ORA_SEARCH__DECODO_API_URL` | `search.decodo_api_url` |
+| `ORA_SEARCH__FALLBACK_TO_FIRECRAWL` | `search.fallback_to_firecrawl` |
 | `ORA_DEEPSEEK_BASE_URL` | legacy `deepseek_base_url` |
 | `ORA_LLM_TIMEOUT_SECONDS` | `llm_timeout_seconds` |
 | `ORA_LLM_MAX_RETRIES` | `llm_max_retries` |

@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 import ora.tools.search as search_mod
 from ora.config import ORASettings, SearchSettings
 from ora.tools.search import web_search
@@ -285,6 +287,134 @@ def test_firecrawl_api_url_env_override(monkeypatch):
         search_mod, "load_config", lambda: _settings(provider="firecrawl", fallback=True)
     )
     monkeypatch.setenv("FIRECRAWL_API_URL", "http://selfhosted.example:3002")
+    seen = []
+
+    def fake_post(url, **kw):
+        seen.append(url)
+        return FakeResp(FIRECRAWL_OK)
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    search_mod._search("q", 5)
+    assert seen == ["http://selfhosted.example:3002/v1/search"]
+
+
+def test_decodo_content_error_falls_back(monkeypatch):
+    """A 200 body carrying content.errors must trigger the fallback.
+
+    Live Decodo (verified 2026-10-01) nests its own error list at
+    content.errors; an empty list means success, a populated one is a failure.
+    """
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
+    monkeypatch.setenv("DECODO_USERNAME", "u")
+    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    seen = []
+
+    def fake_post(url, **kw):
+        seen.append(url)
+        if "/v2/scrape" in url:
+            return FakeResp(
+                {"results": [{"content": {"errors": ["quota exceeded"], "results": {}}}]}
+            )
+        return FakeResp(FIRECRAWL_OK)
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    out = search_mod._search("q", 5)
+    assert "https://f.example" in out
+    assert any("/v1/search" in u for u in seen)
+
+
+def test_decodo_nested_results_error_falls_back(monkeypatch):
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
+    monkeypatch.setenv("DECODO_USERNAME", "u")
+    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    seen = []
+
+    def fake_post(url, **kw):
+        seen.append(url)
+        if "/v2/scrape" in url:
+            return FakeResp(
+                {"results": [{"content": {"results": {"errors": ["bad parse"]}}}]}
+            )
+        return FakeResp(FIRECRAWL_OK)
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    out = search_mod._search("q", 5)
+    assert "https://f.example" in out
+    assert any("/v1/search" in u for u in seen)
+
+
+def test_decodo_bad_content_status_falls_back(monkeypatch):
+    """content.status_code is Decodo's own parse status; 12000 (and 200) mean
+    success, anything else present is a failure and must fall back."""
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
+    monkeypatch.setenv("DECODO_USERNAME", "u")
+    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    seen = []
+
+    def fake_post(url, **kw):
+        seen.append(url)
+        if "/v2/scrape" in url:
+            return FakeResp(
+                {"results": [{"content": {"status_code": 10000, "results": {}}}]}
+            )
+        return FakeResp(FIRECRAWL_OK)
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    out = search_mod._search("q", 5)
+    assert "https://f.example" in out
+    assert any("/v1/search" in u for u in seen)
+
+
+def test_live_success_content_status_is_not_treated_as_error(monkeypatch):
+    """content.status_code == 12000 is a live success; it must NOT be a failure."""
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=False))
+    monkeypatch.setenv("DECODO_USERNAME", "u")
+    monkeypatch.setenv("DECODO_PASSWORD", "p")
+
+    def fake_post(url, **kw):
+        return FakeResp(
+            {
+                "results": [
+                    {
+                        "content": {
+                            "status_code": 12000,
+                            "errors": [],
+                            "results": {
+                                "results": {
+                                    "organic": [
+                                        {"title": "T", "url": "https://x.example", "desc": "d"}
+                                    ]
+                                }
+                            },
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    out = search_mod._search("q", 5)
+    assert "https://x.example" in out
+
+
+def test_unknown_provider_warns_and_uses_firecrawl(monkeypatch):
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(provider="decodo "))
+    monkeypatch.setenv("FIRECRAWL_API_URL", "http://selfhosted.example:3002")
+
+    def fake_post(url, **kw):
+        return FakeResp(FIRECRAWL_OK)
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    with pytest.warns(UserWarning, match="Unknown search provider"):
+        out = search_mod._search("q", 5)
+    assert "https://f.example" in out
+
+
+def test_firecrawl_base_url_trailing_slash_is_stripped(monkeypatch):
+    monkeypatch.setattr(
+        search_mod, "load_config", lambda: _settings(provider="firecrawl", fallback=True)
+    )
+    monkeypatch.setenv("FIRECRAWL_API_URL", "http://selfhosted.example:3002/")
     seen = []
 
     def fake_post(url, **kw):

@@ -10,6 +10,40 @@ from ora.config import SearchSettings, load_config
 
 _MAX_RESULTS = 5
 
+# Decodo reports its own parse status in content.status_code. Verified against
+# the live API (2026-10-01): a successful google_search response carries
+# content.status_code == 12000 (the entry-level status_code is the HTTP 200).
+# 200 is accepted too for older/other shapes; any other present value is a
+# provider failure. Treating "!= 200" as failure would misread every live
+# success, so the success set is explicit.
+_SUCCESS_CONTENT_STATUS = frozenset({200, 12000})
+
+
+def _non_empty_error(value: object) -> bool:
+    """True when an error field actually carries an error.
+
+    Decodo error fields are absent, an empty list/string (success), or a
+    populated list/string (failure). Non-empty dicts are treated as failures
+    too, defensively.
+    """
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return len(value) > 0
+    return False
+
+
+def _is_success_content_status(value: object) -> bool:
+    """Whether content.status_code denotes success (None means "not reported")."""
+    if value is None:
+        return True
+    try:
+        return int(value) in _SUCCESS_CONTENT_STATUS  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+
 
 def _decodo_search(
     query: str, settings: SearchSettings, limit: int = _MAX_RESULTS
@@ -67,6 +101,18 @@ def _decodo_search(
         content = entry.get("content") or {}
         if not isinstance(content, dict):
             continue
+        # A 200 response can still carry a provider-side error, which Decodo
+        # nests at content.errors (older/fixture shapes use
+        # content.results.errors). Either, or a non-success content.status_code,
+        # is a provider failure: return an error so the Firecrawl fallback runs
+        # instead of reading it as a legitimate empty answer.
+        if _non_empty_error(content.get("errors")):
+            return [], f"decodo content error: {content.get('errors')}"
+        error_outer = content.get("results") or {}
+        if isinstance(error_outer, dict) and _non_empty_error(error_outer.get("errors")):
+            return [], f"decodo results error: {error_outer.get('errors')}"
+        if not _is_success_content_status(content.get("status_code")):
+            return [], f"decodo content status {content.get('status_code')}"
         # Decodo's parse:true response nests organic results by depth, and the
         # live API (verified 2026-10-01) uses the two-level shape
         # content.results.results.organic. Older/other responses use a single
@@ -108,6 +154,9 @@ def _firecrawl_search(
     query: str, settings: SearchSettings, limit: int = _MAX_RESULTS
 ) -> tuple[list[dict], str | None]:
     url = os.environ.get("FIRECRAWL_API_URL", settings.firecrawl_api_url)
+    # Strip trailing slashes so a URL like "http://host:3002/" does not build
+    # a "//v1/search" path.
+    url = url.rstrip("/")
     try:
         resp = requests.post(
             f"{url}/v1/search",
@@ -176,6 +225,16 @@ def _search(query: str, limit: int = _MAX_RESULTS) -> str:
         if fb_err is None:
             return "No search results found."
         return f"Search error: decodo={err}; firecrawl={fb_err}"
+    elif provider != "firecrawl":
+        # An unrecognized provider (e.g. a typo like "decodo ") must not
+        # silently disable itself; name it and fall back, mirroring the LLM
+        # provider registry's handling of unknown prefixes.
+        import warnings
+
+        warnings.warn(
+            f"Unknown search provider '{s.search.provider}'; falling back to 'firecrawl'.",
+            stacklevel=2,
+        )
     results, err = _firecrawl_search(query, s.search, limit)
     if results:
         return _format(results)
