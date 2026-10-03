@@ -438,3 +438,39 @@ class TestRunModelOverrides:
         settings = ORASettings(models=ModelSettings(default="my-default"))
         set_model_override("researcher", "openrouter:qwen/qwen3.7-flash")
         assert get_supervisor_model(settings) == "my-default"
+
+
+class TestProviderBlockMerge:
+    """A partial provider/providers block must not discard env values.
+
+    CONFIG.md promises that a YAML key only overrides its own env var, and this
+    holds for every nested block including provider and providers.
+    """
+
+    def test_provider_block_preserves_env_default(self, monkeypatch):
+        monkeypatch.setenv("ORA_PROVIDER__DEFAULT", "openrouter")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("provider: {}\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.provider.default == "openrouter"
+            os.unlink(f.name)
+
+    def test_yaml_provider_default_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("ORA_PROVIDER__DEFAULT", "openrouter")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("provider:\n  default: deepseek\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.provider.default == "deepseek"
+            os.unlink(f.name)
+
+    def test_partial_providers_entry_preserves_env_fields(self, monkeypatch):
+        monkeypatch.setenv("ORA_PROVIDERS__OPENROUTER__API_KEY_ENV", "MY_KEY")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("providers:\n  openrouter:\n    base_url: http://x.example/v1\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.providers["openrouter"].base_url == "http://x.example/v1"
+            assert config.providers["openrouter"].api_key_env == "MY_KEY"
+            os.unlink(f.name)

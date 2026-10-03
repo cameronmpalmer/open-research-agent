@@ -4,10 +4,11 @@
 
 Search reliability and research throughput.
 
-- New `decodo` search provider (`search.provider: decodo`), using Decodo's Google
-  SERP API with automatic fallback to Firecrawl. Credentials come from
-  `DECODO_USERNAME` / `DECODO_PASSWORD`. Empty results are treated as an answer
-  and do not trigger the fallback; provider failures do.
+- New `decodo` search provider (`search.provider: decodo`), using Decodo's
+  Google SERP API. Credentials come from `DECODO_USERNAME` / `DECODO_PASSWORD`.
+  Search failures are reported as errors rather than silently producing an
+  empty result; the Firecrawl fallback is off by default and must be opted into
+  with `search.fallback_to_firecrawl: true`.
 - Firecrawl search honors the `FIRECRAWL_API_URL` env override again, matching
   scrape behavior and `CONFIG.md`.
 - Research now scrapes and extracts each query's URLs concurrently

@@ -141,11 +141,17 @@ def load_config(config_path: str | None = None) -> ORASettings:
             if "limits" in yaml_data:
                 settings.limits = _merge_block(settings.limits, yaml_data["limits"], LimitSettings)
             if "provider" in yaml_data:
-                settings.provider = ProviderDefaultSettings(**yaml_data["provider"])
+                settings.provider = _merge_block(
+                    settings.provider, yaml_data["provider"] or {}, ProviderDefaultSettings
+                )
             if "providers" in yaml_data:
-                settings.providers = {
-                    name: ProviderSettings(**cfg) for name, cfg in yaml_data["providers"].items()
-                }
+                # Merge per provider key so a partial YAML entry (for example
+                # only base_url) does not discard an env-provided api_key_env.
+                merged_providers = dict(settings.providers)
+                for name, cfg in (yaml_data["providers"] or {}).items():
+                    base = merged_providers.get(name) or ProviderSettings()
+                    merged_providers[name] = _merge_block(base, cfg or {}, ProviderSettings)
+                settings.providers = merged_providers
             elif "deepseek_base_url" in yaml_data:
                 # Legacy config: no providers map, honor the old flat key.
                 settings.providers["deepseek"] = ProviderSettings(
@@ -153,9 +159,9 @@ def load_config(config_path: str | None = None) -> ORASettings:
                 )
             if "deepseek_base_url" in yaml_data:
                 settings.deepseek_base_url = yaml_data["deepseek_base_url"]
-            if "llm_timeout_seconds" in yaml_data:
+            if yaml_data.get("llm_timeout_seconds") is not None:
                 settings.llm_timeout_seconds = float(yaml_data["llm_timeout_seconds"])
-            if "llm_max_retries" in yaml_data:
+            if yaml_data.get("llm_max_retries") is not None:
                 settings.llm_max_retries = int(yaml_data["llm_max_retries"])
 
     return settings
