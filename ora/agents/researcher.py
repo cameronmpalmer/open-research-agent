@@ -1,6 +1,9 @@
 """Researcher agent node for LangGraph."""
 
+import contextvars
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from urllib.parse import urlparse
 
@@ -405,6 +408,114 @@ def generate_gap_queries_for_items(
     return _fresh(queries, executed_queries)
 
 
+def _research_concurrency() -> int:
+    """Bounded parallelism for scrape+extract. Env-tunable, minimum 1."""
+    try:
+        return max(1, int(os.environ.get("ORA_RESEARCH_CONCURRENCY", "4")))
+    except ValueError:
+        return 4
+
+
+def _scrape_and_extract_one(
+    url: str,
+    normalized_url: str,
+    title: str,
+    max_content_chars: int,
+    query: str,
+    intensity: int,
+    model_name: str,
+    config: RunnableConfig | None,
+) -> dict:
+    """Scrape one URL and evaluate it. Safe to call from a worker thread.
+
+    Never raises: all failures are reported in the returned dict so a single bad
+    URL cannot abort the batch.
+    """
+    from ora.tools.evaluate import evaluate_source
+    from ora.tools.extract import extract_and_evaluate
+    from ora.tools.scrape import scrape_page
+
+    display_url = url.replace("https://", "").replace("http://", "")[:80]
+    out = {
+        "url": url,
+        "normalized_url": normalized_url,
+        "ok": False,
+        "source": None,
+        "extraction": None,
+        "claim_text": "",
+        "log": [],
+        "events": [],
+    }
+    try:
+        content = scrape_page.invoke({"url": url})
+    except Exception as e:  # noqa: BLE001
+        out["log"].append(f"  Scraped: 0 chars from {url[:60]} (FAIL: {e})")
+        out["events"].append((f"Researcher: scrape failed for {display_url}", "error"))
+        return out
+
+    # Coerce defensively so a non-str tool return cannot raise below and
+    # abort the whole batch via fut.result().
+    if not isinstance(content, str):
+        content = str(content)
+
+    is_error = content.startswith(("Scrape error", "Scrape failed", "No content extracted"))
+    out["log"].append(
+        f"  Scraped: {len(content)} chars from {url[:60]} {'(FAIL)' if is_error else ''}"
+    )
+    if is_error:
+        out["events"].append((f"Researcher: scrape failed for {display_url}", "error"))
+        return out
+
+    out["events"].append(
+        (f"Researcher: scraped {len(content)} chars from {display_url}", "success")
+    )
+
+    try:
+        content = content[:max_content_chars]
+        if intensity >= 3:
+            source, extraction = extract_and_evaluate(
+                url=url,
+                title=title,
+                content=content,
+                source_type="unknown",
+                query=query,
+                config=config,
+                max_chars=max_content_chars,
+                model_name=model_name,
+            )
+            claim_text = extraction.summary if extraction.summary else content[:500]
+            out["log"].append(
+                f"  Extracted: {len(extraction.key_claims)} claims, "
+                f"{len(extraction.recommendations)} recommendations, "
+                f"reliability={extraction.source_reliability}"
+            )
+        else:
+            source = evaluate_source(
+                url=url, title=title, content=content, source_type="unknown"
+            )
+            extraction = None
+            claim_text = content[:500]
+    except Exception as e:  # noqa: BLE001
+        out["log"].append(f"  Source eval failed from {url[:60]}: {e}")
+        out["events"].append(
+            (f"Researcher: source evaluation failed for {display_url}", "error")
+        )
+        source = Source(
+            url=url,
+            title="",
+            source_type="unknown",
+            overall_reliability="Low",
+            notes=f"Source evaluation failed: {e}",
+        )
+        extraction = None
+        claim_text = content[:500] if content else ""
+    else:
+        out["events"].append(("Researcher: evaluated source reliability", "info"))
+
+    out.update(ok=True, source=source, extraction=extraction, claim_text=claim_text)
+    return out
+
+
 def _scrape_and_collect(
     urls: list[str],
     params: dict,
@@ -427,16 +538,22 @@ def _scrape_and_collect(
     Returns True if we've hit the overall min_sources target and the caller
     should stop further work.
     """
-    from ora.tools.evaluate import evaluate_source
-    from ora.tools.scrape import scrape_page
-
     scraped_this_query = 0
+    # Each entry carries both the raw URL and its normalized form so the
+    # dedupe key is computed once, not again per submit.
+    pending: list[tuple[str, str]] = []
+    pending_keys: set[str] = set()
     for url in urls[: params["urls_per_query"]]:
         if len(sources) >= min_sources and not force_scrape:
             return True
 
         normalized_url = _normalize_url_for_dedupe(url)
-        if normalized_url in seen_urls:
+        # Dedupe up front, including URLs already queued in this query. A
+        # duplicate is submitted exactly once even if its first attempt fails:
+        # the base behaviour retried a failed duplicate, but that would submit
+        # the same URL twice in one concurrent batch (two simultaneous scrapes
+        # of one page), which is worse than skipping the retry.
+        if normalized_url in seen_urls or normalized_url in pending_keys:
             display_url = url.replace("https://", "").replace("http://", "")[:80]
             log.append(f"  Skipping duplicate source URL: {url[:80]}")
             emit_progress(config, f"Researcher: skipping duplicate {display_url}", kind="info")
@@ -450,90 +567,97 @@ def _scrape_and_collect(
             )
             continue
 
-        display_url = url.replace("https://", "").replace("http://", "")[:80]
-        emit_progress(config, f"Researcher: scraping {display_url}", kind="scrape")
-        c = scrape_page.invoke({"url": url})
-        is_error = c.startswith(("Scrape error", "Scrape failed", "No content extracted"))
-        log.append(f"  Scraped: {len(c)} chars from {url[:60]} {'(FAIL)' if is_error else ''}")
-        if is_error:
-            emit_progress(config, f"Researcher: scrape failed for {display_url}", kind="error")
-            continue
+        pending.append((url, normalized_url))
+        pending_keys.add(normalized_url)
 
-        emit_progress(
-            config, f"Researcher: scraped {len(c)} chars from {display_url}", kind="success"
-        )
+    width = max(1, min(_research_concurrency(), params.get("scrapes_per_query", 4) or 4))
+    # One pool for the whole query: each batch is drained before the next is
+    # submitted, so per-batch isolation buys nothing and would repeatedly spin
+    # threads up and down on the hot path.
+    with ThreadPoolExecutor(max_workers=width) as pool:
+        start = 0
+        while start < len(pending):
+            if len(sources) >= min_sources and not force_scrape:
+                return True
+            if scraped_this_query >= params["scrapes_per_query"]:
+                # Cap already reached in a prior chunk: do not submit another
+                # batch of scrapes/extractions.
+                break
 
-        c = c[:max_content_chars]
-
-        # Normalize the URL for source URL tracking.
-        # source.url remains as-is (the original), seen_urls uses the normalized variant.
-        try:
-            if intensity >= 3:
-                # LLM-powered extraction + evaluation at high intensities.
-                from ora.tools.extract import extract_and_evaluate
-
-                source, extraction = extract_and_evaluate(
-                    url=url,
-                    title=url_titles.get(normalized_url, ""),
-                    content=c,
-                    source_type="unknown",
-                    query=query,
-                    config=config,
-                    max_chars=max_content_chars,
-                    model_name=model_name,
-                )
-                # Use the LLM-extracted summary as the claim (much richer than c[:500]).
-                claim_text = extraction.summary if extraction.summary else c[:500]
-                log.append(
-                    f"  Extracted: {len(extraction.key_claims)} claims, "
-                    f"{len(extraction.recommendations)} recommendations, "
-                    f"reliability={extraction.source_reliability}"
-                )
-            else:
-                # Heuristic evaluation for cost efficiency at low intensities.
-                source = evaluate_source(
-                    url=url,
-                    title=url_titles.get(normalized_url, ""),
-                    content=c,
-                    source_type="unknown",
-                )
-                extraction = None
-                claim_text = c[:500]
-        except Exception as e:  # noqa: BLE001
-            log.append(f"  Source eval failed from {url[:60]}: {e}")
+            # Slice to the remaining budget so a batch never scrapes (and, at
+            # intensity >= 3, LLM-extracts) past the per-query cap. Without
+            # this, cap=5 with width=4 runs 4 then another 4 and discards 3.
+            remaining = params["scrapes_per_query"] - scraped_this_query
+            chunk = pending[start : start + min(width, remaining)]
+            if not chunk:
+                break
+            # Advance by what the chunk consumed, not by width: when the budget
+            # truncates a chunk, stepping by width would silently skip the URLs
+            # between start + len(chunk) and start + width.
+            start += len(chunk)
             emit_progress(
-                config, f"Researcher: source evaluation failed for {display_url}", kind="error"
+                config,
+                f"Researcher: scraping {len(chunk)} pages concurrently",
+                kind="scrape",
             )
-            source = Source(
-                url=url,
-                title="",
-                source_type="unknown",
-                overall_reliability="Low",
-                notes=f"Source evaluation failed: {e}",
-            )
-            extraction = None
-            claim_text = c[:500] if c else ""
-        else:
-            emit_progress(config, "Researcher: evaluated source reliability", kind="info")
+            for url, _normalized in chunk:
+                display_url = url.replace("https://", "").replace("http://", "")[:80]
+                emit_progress(config, f"Researcher: scraping {display_url}", kind="scrape")
+            results: list[tuple[int, dict]] = []
+            # Copy the submitting context per task so workers inherit the
+            # active UsageCollector (ContextVars are not shared across threads).
+            futures = {
+                pool.submit(
+                    contextvars.copy_context().run,
+                    _scrape_and_extract_one,
+                    url,
+                    normalized_url,
+                    url_titles.get(normalized_url, ""),
+                    max_content_chars,
+                    query,
+                    intensity,
+                    model_name,
+                    config,
+                ): index
+                for index, (url, normalized_url) in enumerate(chunk)
+            }
+            for fut in as_completed(futures):
+                results.append((futures[fut], fut.result()))
 
-        finding_confidence = {
-            "High": "High",
-            "Medium": "Moderate",
-            "Low": "Low",
-        }.get(source.overall_reliability, "Unknown")
-        sources.append(source)
-        seen_urls.add(normalized_url)
-        findings.append(
-            Finding(
-                claim=claim_text,
-                confidence=finding_confidence,  # type: ignore[arg-type]
-                supporting_sources=[url],
-                extraction=extraction,
-            )
-        )
-        scraped_this_query += 1
-        if scraped_this_query >= params["scrapes_per_query"]:
-            break
+            results.sort(key=lambda item: item[0])
+
+            for position, (_, r) in enumerate(results):
+                log.extend(r["log"])
+                for message, kind in r["events"]:
+                    emit_progress(config, message, kind=kind)
+                if not r["ok"]:
+                    continue
+                if len(sources) >= min_sources and not force_scrape:
+                    # min_sources is met: record this batch's already-scraped
+                    # remainder as seen so a later revise pass does not re-scrape
+                    # (and re-extract) URLs we are dropping here.
+                    seen_urls.update(res["normalized_url"] for _, res in results[position:])
+                    return True
+
+                source, extraction, claim_text = r["source"], r["extraction"], r["claim_text"]
+                finding_confidence = {
+                    "High": "High",
+                    "Medium": "Moderate",
+                    "Low": "Low",
+                }.get(source.overall_reliability, "Unknown")
+                sources.append(source)
+                seen_urls.add(r["normalized_url"])
+                findings.append(
+                    Finding(
+                        claim=claim_text or "",
+                        confidence=finding_confidence,  # type: ignore[arg-type]
+                        supporting_sources=[r["url"]],
+                        extraction=extraction,
+                    )
+                )
+                scraped_this_query += 1
+                if scraped_this_query >= params["scrapes_per_query"]:
+                    break
 
     return len(sources) >= min_sources
 

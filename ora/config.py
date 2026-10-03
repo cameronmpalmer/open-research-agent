@@ -1,6 +1,7 @@
 """Configuration loading via YAML, env vars, and pydantic-settings."""
 
 import os
+from typing import TypeVar
 
 import yaml
 from pydantic import BaseModel, Field
@@ -16,6 +17,18 @@ class SearchSettings(BaseModel):
     provider: str = "firecrawl"
     firecrawl_api_key: str | None = None
     firecrawl_api_url: str = "https://api.firecrawl.com"
+    # Decodo SERP API (https://scraper-api.decodo.com/v2/scrape). Credentials are
+    # read from process env only, never from config.yaml.
+    decodo_api_url: str = "https://scraper-api.decodo.com/v2/scrape"
+    decodo_username_env: str = "DECODO_USERNAME"
+    decodo_password_env: str = "DECODO_PASSWORD"
+    decodo_domain: str = "com"
+    decodo_locale: str = "en-us"
+    # Off by default: Firecrawl search is unreliable and in practice often
+    # returns nothing, so silently falling back hides Decodo failures. The
+    # fallback is still available, but must be opted into with
+    # `search.fallback_to_firecrawl: true` (or ORA_SEARCH__FALLBACK_TO_FIRECRAWL).
+    fallback_to_firecrawl: bool = False
 
 
 class ModelSettings(BaseModel):
@@ -58,6 +71,14 @@ class ORASettings(BaseSettings):
     providers: dict[str, ProviderSettings] = Field(default_factory=dict)
     deepseek_base_url: str = "https://api.deepseek.com"  # legacy; kept for backward compat
 
+    # Per-call LLM bounds. Without these the OpenAI SDK defaults apply
+    # (read timeout 600s, max_retries=2), so a single stalled call can block
+    # a run for ~30 minutes. 300s leaves headroom over the slowest observed
+    # legitimate call (155s); with max_retries=2 the worst case for one
+    # logical call is about 900s (3 attempts x 300s), not ~30 minutes.
+    llm_timeout_seconds: float = 300.0
+    llm_max_retries: int = 2
+
 
 DEFAULT_PROVIDERS: dict[str, ProviderSettings] = {
     "deepseek": ProviderSettings(
@@ -75,6 +96,32 @@ DEFAULT_PROVIDERS: dict[str, ProviderSettings] = {
 }
 
 
+_BlockT = TypeVar("_BlockT", bound=BaseModel)
+
+
+def _merge_block(base: _BlockT, overrides: dict, model_cls: type[_BlockT]) -> _BlockT:
+    """Merge a YAML block over env/defaults field by field.
+
+    Replacing the whole block would silently discard env-provided values for
+    keys the YAML omits (e.g. a ``search:`` block with only
+    ``firecrawl_api_url`` would reset an env ``ORA_SEARCH__PROVIDER=decodo``
+    back to the default). Only the keys actually present in the YAML block
+    override, so YAML still wins for the keys it defines.
+
+    A bare ``key:`` in YAML parses to ``None``; treat that as an empty block so
+    no call site has to guard it.
+    """
+    overrides = overrides or {}
+    data = base.model_dump()
+    data.update({key: value for key, value in overrides.items() if key in data})
+    return model_cls(**data)
+
+
+def _merge_search(base: SearchSettings, overrides: dict) -> SearchSettings:
+    """Merge a YAML ``search:`` block over env/defaults field by field."""
+    return _merge_block(base, overrides, SearchSettings)
+
+
 def load_config(config_path: str | None = None) -> ORASettings:
     """Load ORA configuration from YAML file and environment.
 
@@ -90,19 +137,25 @@ def load_config(config_path: str | None = None) -> ORASettings:
             yaml_data = yaml.safe_load(f)
         if yaml_data:
             if "models" in yaml_data:
-                settings.models = ModelSettings(**yaml_data["models"])
+                settings.models = _merge_block(settings.models, yaml_data["models"], ModelSettings)
             if "search" in yaml_data:
-                settings.search = SearchSettings(**yaml_data["search"])
+                settings.search = _merge_search(settings.search, yaml_data["search"])
             if "output" in yaml_data:
-                settings.output = OutputSettings(**yaml_data["output"])
+                settings.output = _merge_block(settings.output, yaml_data["output"], OutputSettings)
             if "limits" in yaml_data:
-                settings.limits = LimitSettings(**yaml_data["limits"])
+                settings.limits = _merge_block(settings.limits, yaml_data["limits"], LimitSettings)
             if "provider" in yaml_data:
-                settings.provider = ProviderDefaultSettings(**yaml_data["provider"])
+                settings.provider = _merge_block(
+                    settings.provider, yaml_data["provider"], ProviderDefaultSettings
+                )
             if "providers" in yaml_data:
-                settings.providers = {
-                    name: ProviderSettings(**cfg) for name, cfg in yaml_data["providers"].items()
-                }
+                # Merge per provider key so a partial YAML entry (for example
+                # only base_url) does not discard an env-provided api_key_env.
+                merged_providers = dict(settings.providers)
+                for name, cfg in (yaml_data["providers"] or {}).items():
+                    base = merged_providers.get(name) or ProviderSettings()
+                    merged_providers[name] = _merge_block(base, cfg, ProviderSettings)
+                settings.providers = merged_providers
             elif "deepseek_base_url" in yaml_data:
                 # Legacy config: no providers map, honor the old flat key.
                 settings.providers["deepseek"] = ProviderSettings(
@@ -110,6 +163,10 @@ def load_config(config_path: str | None = None) -> ORASettings:
                 )
             if "deepseek_base_url" in yaml_data:
                 settings.deepseek_base_url = yaml_data["deepseek_base_url"]
+            if yaml_data.get("llm_timeout_seconds") is not None:
+                settings.llm_timeout_seconds = float(yaml_data["llm_timeout_seconds"])
+            if yaml_data.get("llm_max_retries") is not None:
+                settings.llm_max_retries = int(yaml_data["llm_max_retries"])
 
     return settings
 
@@ -258,6 +315,11 @@ def get_llm(model_name: str, temperature: float = 0.0):
         base_url=provider.base_url,
         api_key=api_key,
         default_headers=provider.headers or None,
+        # request_timeout is the canonical langchain-openai field ("timeout" is
+        # its alias); kept as request_timeout for compatibility with older
+        # langchain-openai releases.
+        request_timeout=settings.llm_timeout_seconds,
+        max_retries=settings.llm_max_retries,
     )
 
     # When a usage collector is active (ora.usage.usage_collection), return a

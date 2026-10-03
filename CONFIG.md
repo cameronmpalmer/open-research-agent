@@ -63,6 +63,9 @@ providers:
       HTTP-Referer: https://github.com/cameronmpalmer/open-research-agent
       X-Title: ORA
 
+# llm_timeout_seconds: 300.0   # optional; per-call read timeout (SDK default 600s)
+# llm_max_retries: 2           # optional; retries per LLM call
+
 # deepseek_base_url: https://api.deepseek.com   # legacy key, see below
 ```
 
@@ -92,9 +95,29 @@ site bypasses the configured model.
 
 | Key | Default | Purpose |
 |---|---|---|
-| `search.provider` | `firecrawl` | Search and scrape backend |
+| `search.provider` | `firecrawl` | Search backend: `firecrawl` or `decodo`. Unrecognized values warn and fall back to `firecrawl`. |
 | `search.firecrawl_api_key` | (unset) | Firecrawl key; normally exported as `FIRECRAWL_API_KEY` instead |
 | `search.firecrawl_api_url` | `https://api.firecrawl.com` | Firecrawl endpoint; set to `http://localhost:3002` for self-hosted Firecrawl (key optional there) |
+| `search.decodo_api_url` | `https://scraper-api.decodo.com/v2/scrape` | Decodo SERP endpoint (`target: google_search`) |
+| `search.decodo_username_env` | `DECODO_USERNAME` | Name of the env var holding the Decodo username |
+| `search.decodo_password_env` | `DECODO_PASSWORD` | Name of the env var holding the Decodo password |
+| `search.decodo_domain` | `com` | Google domain to search |
+| `search.decodo_locale` | `en-us` | Result locale |
+| `search.fallback_to_firecrawl` | `false` | Opt in to retrying a Decodo *failure* via Firecrawl |
+
+Decodo credentials are read from process env only and are never written to
+`config.yaml`; the two `*_env` settings name the variables to read. Enable
+Decodo with `search.provider: decodo` plus `DECODO_USERNAME` and
+`DECODO_PASSWORD` exported.
+
+The fallback is deliberate and narrow, and it is **off by default**: Firecrawl
+search is unreliable and in practice often returns nothing, so silently falling
+back would hide Decodo failures. Set `search.fallback_to_firecrawl: true` to
+opt in. When enabled, a Decodo **failure** (bad credentials, HTTP error,
+provider-reported error, or a malformed body) retries via Firecrawl; either way,
+a successful search that simply found nothing is reported as
+`No search results found.` and does **not** retry, so a quiet query is not
+double-billed. Scrape always uses Firecrawl regardless of `search.provider`.
 
 ### output
 
@@ -141,6 +164,20 @@ A provider without a `base_url` is rejected with a clear error at call time.
 A model prefix naming a provider that is neither built in nor configured
 warns and falls back to the default provider.
 
+### LLM call bounds
+
+Top-level scalars that bound each LLM request. They apply to every provider
+and every agent call, so a stalled request cannot block a run indefinitely.
+
+| Key | Default | Purpose |
+|---|---|---|
+| `llm_timeout_seconds` | `300.0` | Read timeout for one LLM call. The OpenAI SDK default is 600s; 300s leaves headroom over the slowest observed legitimate call (~155s) while capping the worst case. |
+| `llm_max_retries` | `2` | Retries per LLM call after the first attempt. With the 300s timeout this bounds one logical call to roughly 15 minutes instead of the ~30 minutes the SDK defaults allow. |
+
+Both are honored from YAML and from their `ORA_` env-var forms
+(`ORA_LLM_TIMEOUT_SECONDS`, `ORA_LLM_MAX_RETRIES`); as everywhere else, a YAML
+key wins over its env var.
+
 ### Legacy: `deepseek_base_url`
 
 Before the `providers:` map existed, the DeepSeek base URL was a flat
@@ -165,6 +202,9 @@ var to use) and are not loaded from a `.env` file.
 | `OPENAI_API_KEY` | Legacy fallback for deepseek when `DEEPSEEK_API_KEY` is unset |
 | `FIRECRAWL_API_KEY` | Search/scrape; overrides `search.firecrawl_api_key` |
 | `FIRECRAWL_API_URL` | Search/scrape endpoint; overrides `search.firecrawl_api_url` |
+| `DECODO_USERNAME` | Decodo SERP username (needed when `search.provider: decodo`) |
+| `DECODO_PASSWORD` | Decodo SERP password (needed when `search.provider: decodo`) |
+| `ORA_RESEARCH_CONCURRENCY` | Parallel scrape+extract workers per query batch. Default `4`, clamped to a minimum of `1`, and capped by `scrapes_per_query`. Higher values finish research faster at the cost of more simultaneous Firecrawl and LLM requests. Not a `config.yaml` key. |
 
 ### ORA_ settings variables
 
@@ -181,7 +221,13 @@ Common examples:
 | `ORA_MODELS__SUPERVISOR` | `models.supervisor` |
 | `ORA_MODELS__DEFAULT` | `models.default` |
 | `ORA_PROVIDER__DEFAULT` | `provider.default` |
+| `ORA_SEARCH__PROVIDER` | `search.provider` |
+| `ORA_SEARCH__FIRECRAWL_API_URL` | `search.firecrawl_api_url` |
+| `ORA_SEARCH__DECODO_API_URL` | `search.decodo_api_url` |
+| `ORA_SEARCH__FALLBACK_TO_FIRECRAWL` | `search.fallback_to_firecrawl` |
 | `ORA_DEEPSEEK_BASE_URL` | legacy `deepseek_base_url` |
+| `ORA_LLM_TIMEOUT_SECONDS` | `llm_timeout_seconds` |
+| `ORA_LLM_MAX_RETRIES` | `llm_max_retries` |
 | `ORA_LIMITS__MAX_REVISIONS` | `limits.max_revisions` |
 
 ## Provider routing

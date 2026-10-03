@@ -75,6 +75,27 @@ class TestUsageCollector:
         # yield 0 cached (documented limitation).
         assert collector.cached_tokens == 0
 
+    def test_raw_usage_is_computed_once_per_record(self):
+        """The raw payload is read once, even on the cached-fallback path."""
+        collector = UsageCollector()
+        calls = {"n": 0}
+        original = collector._raw_usage
+
+        def counting(response):
+            calls["n"] += 1
+            return original(response)
+
+        collector._raw_usage = counting
+        collector.record(
+            _message(
+                usage_metadata={"input_tokens": 10, "output_tokens": 5},
+                token_usage={"cost": 1.0, "prompt_cache_hit_tokens": 4},
+            )
+        )
+        assert calls["n"] == 1
+        assert collector.cached_tokens == 4  # fallback still applied
+        assert collector.cost == pytest.approx(1.0)
+
     def test_response_without_usage_is_ignored(self):
         collector = UsageCollector()
         collector.record(_message())
