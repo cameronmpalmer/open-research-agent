@@ -319,7 +319,14 @@ def _fake_extract(**kwargs):
 
 
 def test_concurrent_scrape_keeps_order_and_overlaps(monkeypatch):
+    """The first batch runs concurrently (barrier-proven), order is preserved.
+
+    A threading.Barrier for the first batch's three workers makes the overlap
+    deterministic: if the pool ran those tasks sequentially the barrier would
+    time out instead of relying on a wall-clock sleep.
+    """
     monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "3")
+    barrier = threading.Barrier(3, timeout=5)
     active = {"now": 0, "max": 0}
     lock = threading.Lock()
 
@@ -328,10 +335,11 @@ def test_concurrent_scrape_keeps_order_and_overlaps(monkeypatch):
             active["now"] += 1
             active["max"] = max(active["max"], active["now"])
         try:
-            import time
-
             index = int(payload["url"].rstrip("/").rsplit("p", 1)[1])
-            time.sleep(0.06 - 0.01 * index)  # p5 finishes before p0
+            if index < 3:
+                # Only the first batch's three workers reach this; all three
+                # must arrive or the barrier raises after the timeout.
+                barrier.wait()
         finally:
             with lock:
                 active["now"] -= 1
@@ -352,7 +360,7 @@ def test_concurrent_scrape_keeps_order_and_overlaps(monkeypatch):
     assert done is False                      # 6 sources < min_sources=50
     assert [s.url for s in sources] == urls   # submission order preserved
     assert len(findings) == 6
-    assert active["max"] >= 2, "no overlap occurred; work is still sequential"
+    assert active["max"] >= 2, "barrier proved fewer than 2 concurrent workers"
     assert active["max"] <= 3, "concurrency knob not respected"
 
 
@@ -376,6 +384,34 @@ def test_concurrent_scrape_stops_at_min_sources(monkeypatch):
 
     assert done is True
     assert len(sources) == 2
+
+
+def test_min_sources_early_return_marks_dropped_urls_seen(monkeypatch):
+    """URLs dropped when min_sources is met mid-batch are recorded as seen.
+
+    Otherwise a later revise pass re-scrapes (and re-extracts) them.
+    """
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "4")
+
+    def fake_scrape(payload):
+        return f"# body {payload['url']}"
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", _fake_extract)
+
+    sources, findings, seen = [], [], set()
+    urls = [f"https://example.org/p{i}" for i in range(4)]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
+        sources, findings, seen, {}, min_sources=1, query="q", intensity=4,
+        model_name="m",
+    )
+
+    assert done is True
+    assert len(sources) == 1  # early return drops the rest of the batch
+    normalized = {_normalize_url_for_dedupe(u) for u in urls}
+    assert normalized <= seen, f"dropped URLs not marked seen: {normalized - seen}"
 
 
 def test_concurrent_scrape_respects_scrapes_per_query_cap(monkeypatch):
@@ -468,6 +504,42 @@ def test_concurrent_scrape_worker_failure_does_not_abort_batch(monkeypatch):
         "https://example.org/p2",
     ]
     assert len(findings) == 2
+
+
+def test_concurrent_scrape_evaluation_failure_keeps_low_finding(monkeypatch):
+    """A raising extractor must not abort the batch or drop the source.
+
+    The handled evaluation-failure branch records a Low-reliability Source with
+    no extraction and still appends a finding.
+    """
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "3")
+
+    def fake_scrape(payload):
+        return f"# body {payload['url']}"
+
+    def fake_extract(**kwargs):
+        if kwargs["url"].endswith("/p1"):
+            raise RuntimeError("extract boom")
+        return _fake_extract(**kwargs)
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", fake_extract)
+
+    sources, findings, seen = [], [], set()
+    urls = [f"https://example.org/p{i}" for i in range(3)]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
+        sources, findings, seen, {}, min_sources=50, query="q", intensity=4,
+        model_name="m",
+    )
+
+    assert done is False
+    assert len(sources) == 3, "batch aborted or dropped the failed source"
+    assert len(findings) == 3
+    low = [f for f in findings if f.confidence == "Low"]
+    assert len(low) == 1, f"expected one Low finding, got {[f.confidence for f in findings]}"
+    assert low[0].supporting_sources == ["https://example.org/p1"]
 
 
 def test_concurrent_scrape_filters_intra_batch_duplicates(monkeypatch):

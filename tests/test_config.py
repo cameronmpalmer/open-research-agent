@@ -156,6 +156,21 @@ class TestLoadConfig:
             assert config.models.default == "yaml-default-model"
             os.unlink(f.name)
 
+    def test_yaml_bare_blocks_are_treated_as_empty(self):
+        """A bare ``key:`` (parsed as None) must not raise AttributeError."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("models:\nsearch:\noutput:\nlimits:\nprovider:\nproviders:\n")
+            f.flush()
+            config = load_config(f.name)
+            os.unlink(f.name)
+        # Every block falls back to its defaults instead of crashing.
+        assert config.models.default == "deepseek-v4-flash"
+        assert config.search.provider == "firecrawl"
+        assert config.output.default_format == "markdown"
+        assert config.limits.max_revisions == 3
+        assert config.provider.default == "deepseek"
+        assert config.providers == {}
+
     def test_get_researcher_model_defaults_to_default(self):
         settings = ORASettings()
         assert get_researcher_model(settings) == "deepseek-v4-flash"

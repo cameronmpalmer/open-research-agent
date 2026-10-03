@@ -21,6 +21,8 @@ Search reliability and research throughput.
   applied (600s read, 2 retries), so a single stalled call could block a run for
   about 30 minutes. See `CONFIG.md`.
 - Usage and cost accounting now works from concurrent workers.
+- Removed the deprecated `create_search_tool` helper from `ora.tools.search`
+  (a public symbol in 0.1.0); use the `web_search` tool instead.
 
 ## 0.1.0
 

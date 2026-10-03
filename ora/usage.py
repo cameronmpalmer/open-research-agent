@@ -49,11 +49,14 @@ class UsageCollector:
         if input_tokens == 0 and output_tokens == 0:
             return
 
+        # Raw provider payload: cached-token fallbacks and reported cost both
+        # read from it, so compute it once.
+        raw = self._raw_usage(response)
+
         # Cached input tokens: usage_metadata detail, then raw payload keys.
         details = usage_metadata.get("input_token_details") or {}
         cached = int(details.get("cache_read") or 0)
         if cached == 0:
-            raw = self._raw_usage(response)
             for key in self._cache_extra_keys:
                 value = raw.get(key)
                 if value is not None:
@@ -61,7 +64,6 @@ class UsageCollector:
                     break
 
         # Provider-reported cost (USD), e.g. OpenRouter's usage.cost.
-        raw = self._raw_usage(response)
         cost = raw.get("cost")
 
         # Worker threads record into a shared collector, so the counter

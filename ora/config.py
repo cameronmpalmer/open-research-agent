@@ -107,7 +107,11 @@ def _merge_block(base: _BlockT, overrides: dict, model_cls: type[_BlockT]) -> _B
     ``firecrawl_api_url`` would reset an env ``ORA_SEARCH__PROVIDER=decodo``
     back to the default). Only the keys actually present in the YAML block
     override, so YAML still wins for the keys it defines.
+
+    A bare ``key:`` in YAML parses to ``None``; treat that as an empty block so
+    no call site has to guard it.
     """
+    overrides = overrides or {}
     data = base.model_dump()
     data.update({key: value for key, value in overrides.items() if key in data})
     return model_cls(**data)
@@ -142,7 +146,7 @@ def load_config(config_path: str | None = None) -> ORASettings:
                 settings.limits = _merge_block(settings.limits, yaml_data["limits"], LimitSettings)
             if "provider" in yaml_data:
                 settings.provider = _merge_block(
-                    settings.provider, yaml_data["provider"] or {}, ProviderDefaultSettings
+                    settings.provider, yaml_data["provider"], ProviderDefaultSettings
                 )
             if "providers" in yaml_data:
                 # Merge per provider key so a partial YAML entry (for example
@@ -150,7 +154,7 @@ def load_config(config_path: str | None = None) -> ORASettings:
                 merged_providers = dict(settings.providers)
                 for name, cfg in (yaml_data["providers"] or {}).items():
                     base = merged_providers.get(name) or ProviderSettings()
-                    merged_providers[name] = _merge_block(base, cfg or {}, ProviderSettings)
+                    merged_providers[name] = _merge_block(base, cfg, ProviderSettings)
                 settings.providers = merged_providers
             elif "deepseek_base_url" in yaml_data:
                 # Legacy config: no providers map, honor the old flat key.

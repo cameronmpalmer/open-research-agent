@@ -641,6 +641,90 @@ def test_unknown_provider_warns_and_uses_firecrawl(monkeypatch):
     assert "https://f.example" in out
 
 
+def test_decodo_populated_shallower_organic_beats_empty_deep(monkeypatch):
+    """An empty deepest organic list must not shadow a populated shallower one."""
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
+    monkeypatch.setenv("DECODO_USERNAME", "u")
+    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    content = {
+        "results": {
+            "parse_status_code": 12000,
+            "results": {"organic": []},
+            "organic": [{"title": "Shallow", "url": "https://shallow.example", "desc": "shallow"}],
+        },
+        "errors": [],
+    }
+    fake_post, seen = _decodo_then_firecrawl({"results": [{"content": content}]})
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    out = search_mod._search("q", 5)
+    assert "https://shallow.example" in out, out
+    assert all("/v1/search" not in u for u in seen), f"fallback fired: {seen}"
+
+
+def test_results_win_over_job_level_failure_signal(monkeypatch):
+    """Pins results-win precedence: usable content beats a job-level failure."""
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
+    monkeypatch.setenv("DECODO_USERNAME", "u")
+    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    payload = {
+        "status": "failed",
+        "status_code": 613,
+        "message": "job failed but content present",
+        "results": [{"content": _live_content(LIVE_ORGANIC, errors=[])}],
+    }
+    fake_post, seen = _decodo_then_firecrawl(payload)
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    out = search_mod._search("q", 5)
+    assert "https://live.example/1" in out, out
+    assert all("/v1/search" not in u for u in seen), f"fallback fired: {seen}"
+
+
+def test_firecrawl_sends_api_key_header(monkeypatch):
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(provider="firecrawl"))
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-secret")
+    captured = {}
+
+    def fake_post(url, **kw):
+        captured["headers"] = kw["headers"]
+        return FakeResp(FIRECRAWL_OK)
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    search_mod._search("q", 5)
+    assert captured["headers"]["Authorization"] == "Bearer fc-secret"
+
+
+def test_firecrawl_omits_auth_header_without_key(monkeypatch):
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(provider="firecrawl"))
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    monkeypatch.delenv("ORA_SEARCH__FIRECRAWL_API_KEY", raising=False)
+    captured = {}
+
+    def fake_post(url, **kw):
+        captured["headers"] = kw["headers"]
+        return FakeResp(FIRECRAWL_OK)
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    search_mod._search("q", 5)
+    assert "Authorization" not in captured["headers"]
+
+
+def test_firecrawl_uses_settings_api_key(monkeypatch):
+    """When the env var is unset, the config-file key is used."""
+    s = ORASettings()
+    s.search = SearchSettings(provider="firecrawl", firecrawl_api_key="from-settings")
+    monkeypatch.setattr(search_mod, "load_config", lambda: s)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    captured = {}
+
+    def fake_post(url, **kw):
+        captured["headers"] = kw["headers"]
+        return FakeResp(FIRECRAWL_OK)
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    search_mod._search("q", 5)
+    assert captured["headers"]["Authorization"] == "Bearer from-settings"
+
+
 class TestSearchTool:
     def test_tool_has_name(self):
         assert web_search.name == "web_search"

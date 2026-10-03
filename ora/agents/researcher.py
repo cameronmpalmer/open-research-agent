@@ -626,13 +626,17 @@ def _scrape_and_collect(
 
             results.sort(key=lambda item: item[0])
 
-            for _, r in results:
+            for position, (_, r) in enumerate(results):
                 log.extend(r["log"])
                 for message, kind in r["events"]:
                     emit_progress(config, message, kind=kind)
                 if not r["ok"]:
                     continue
                 if len(sources) >= min_sources and not force_scrape:
+                    # min_sources is met: record this batch's already-scraped
+                    # remainder as seen so a later revise pass does not re-scrape
+                    # (and re-extract) URLs we are dropping here.
+                    seen_urls.update(res["normalized_url"] for _, res in results[position:])
                     return True
 
                 source, extraction, claim_text = r["source"], r["extraction"], r["claim_text"]

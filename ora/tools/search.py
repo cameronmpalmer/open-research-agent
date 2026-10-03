@@ -6,17 +6,24 @@ https://help.decodo.com/docs/web-scraping-api-status-codes, verified live
 2026-10-02):
 
 * HTTP: ``200`` success; ``204`` job not complete, retry in a few seconds;
-  ``>= 400`` failure (``500``/``524``/``613`` are not billed, but any failure
-  still falls back when the fallback is enabled).
+  ``>= 400`` failure (``500``/``524`` are not billed, but any failure still
+  falls back when the fallback is enabled).
 * Body: top-level ``status == "failed"`` is a failure (for example the HTTP 200
-  ``status_code: 613`` envelope a no-results query returns); a top-level
-  ``status_code`` outside ``{200, 202}`` is a failure.
+  ``status_code: 613`` envelope a no-results query returns; 613 is a body
+  status code, not an HTTP status). A top-level ``status_code`` outside
+  ``{200, 202}`` is also a failure.
 * Per task: ``parse_status_code`` in ``{12000, 12004, 12005}`` is a usable
   parse. When it is absent, ``content.status_code`` in ``{200, 12000}`` is the
   fallback signal. A non-empty ``content.errors`` is a failure.
 * A successful ``parse: true`` ``google_search`` nests organic results at
   ``content.results.results.organic`` (older shapes nest one level shallower or
   put ``organic`` on ``content``). Organic items use ``desc`` for the snippet.
+
+Classification precedence, applied once after parsing: parsed organic results
+win (a job-level failure signal beside usable content is ignored, since a
+needless failure is worse than trusting real content); otherwise a collected
+failure signal fails and, when enabled, triggers the Firecrawl fallback;
+otherwise the result is a legitimate empty parse and never falls back.
 """
 
 import json
@@ -115,7 +122,11 @@ def _top_level_status_is_ok(value: object) -> bool:
 
 
 def _extract_organic(content: dict) -> list:
-    """Organic result list from the deepest nested container, else []."""
+    """The first non-empty organic list among the nested containers, else [].
+
+    Prefer the deepest populated list: an empty ``content.results.results.organic``
+    must not shadow a populated ``content.results.organic`` or ``content.organic``.
+    """
     outer = content.get("results")
     inner = outer.get("results") if isinstance(outer, dict) else None
     for candidate in (
@@ -123,7 +134,7 @@ def _extract_organic(content: dict) -> list:
         outer.get("organic") if isinstance(outer, dict) else None,
         content.get("organic"),
     ):
-        if isinstance(candidate, list):
+        if isinstance(candidate, list) and candidate:
             return candidate
     return []
 
@@ -131,7 +142,14 @@ def _extract_organic(content: dict) -> list:
 def _decodo_search(
     query: str, settings: SearchSettings, limit: int = _MAX_RESULTS
 ) -> tuple[list[dict], str | None]:
-    """Return (results, error). results is [] on any failure."""
+    """Return (results, error). results is [] on any failure.
+
+    Precedence is results-win: parsed organic results are returned even when a
+    top-level job-level failure signal (``status == "failed"`` or a non-success
+    ``status_code``) is also present. A failure is returned only when nothing
+    usable parsed; otherwise the parse is a legitimate empty result
+    (``([], None)``) and never triggers a fallback.
+    """
     username = os.environ.get(settings.decodo_username_env, "")
     password = os.environ.get(settings.decodo_password_env, "")
     if not username or not password:
@@ -269,11 +287,17 @@ def _firecrawl_search(
     # Strip trailing slashes so a URL like "http://host:3002/" does not build
     # a "//v1/search" path.
     url = url.rstrip("/")
+    # Firecrawl cloud requires the key; self-hosted installs run without one, so
+    # only send the header when a key is configured.
+    api_key = os.environ.get("FIRECRAWL_API_KEY") or settings.firecrawl_api_key
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     try:
         resp = requests.post(
             f"{url}/v1/search",
             json={"query": query, "limit": limit},
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             timeout=30,
         )
         if resp.status_code >= 400:
