@@ -1,6 +1,7 @@
 """Configuration loading via YAML, env vars, and pydantic-settings."""
 
 import os
+from typing import TypeVar
 
 import yaml
 from pydantic import BaseModel, Field
@@ -23,7 +24,11 @@ class SearchSettings(BaseModel):
     decodo_password_env: str = "DECODO_PASSWORD"
     decodo_domain: str = "com"
     decodo_locale: str = "en-us"
-    fallback_to_firecrawl: bool = True
+    # Off by default: Firecrawl search is unreliable and in practice often
+    # returns nothing, so silently falling back hides Decodo failures. The
+    # fallback is still available, but must be opted into with
+    # `search.fallback_to_firecrawl: true` (or ORA_SEARCH__FALLBACK_TO_FIRECRAWL).
+    fallback_to_firecrawl: bool = False
 
 
 class ModelSettings(BaseModel):
@@ -91,18 +96,26 @@ DEFAULT_PROVIDERS: dict[str, ProviderSettings] = {
 }
 
 
-def _merge_search(base: SearchSettings, overrides: dict) -> SearchSettings:
-    """Merge a YAML ``search:`` block over env/defaults field by field.
+_BlockT = TypeVar("_BlockT", bound=BaseModel)
+
+
+def _merge_block(base: _BlockT, overrides: dict, model_cls: type[_BlockT]) -> _BlockT:
+    """Merge a YAML block over env/defaults field by field.
 
     Replacing the whole block would silently discard env-provided values for
-    keys the YAML omits (e.g. a block with only ``firecrawl_api_url`` would
-    reset an env ``ORA_SEARCH__PROVIDER=decodo`` back to the default). Only the
-    keys actually present in the YAML block override, so YAML still wins for
-    the keys it defines.
+    keys the YAML omits (e.g. a ``search:`` block with only
+    ``firecrawl_api_url`` would reset an env ``ORA_SEARCH__PROVIDER=decodo``
+    back to the default). Only the keys actually present in the YAML block
+    override, so YAML still wins for the keys it defines.
     """
     data = base.model_dump()
     data.update({key: value for key, value in overrides.items() if key in data})
-    return SearchSettings(**data)
+    return model_cls(**data)
+
+
+def _merge_search(base: SearchSettings, overrides: dict) -> SearchSettings:
+    """Merge a YAML ``search:`` block over env/defaults field by field."""
+    return _merge_block(base, overrides, SearchSettings)
 
 
 def load_config(config_path: str | None = None) -> ORASettings:
@@ -120,13 +133,13 @@ def load_config(config_path: str | None = None) -> ORASettings:
             yaml_data = yaml.safe_load(f)
         if yaml_data:
             if "models" in yaml_data:
-                settings.models = ModelSettings(**yaml_data["models"])
+                settings.models = _merge_block(settings.models, yaml_data["models"], ModelSettings)
             if "search" in yaml_data:
                 settings.search = _merge_search(settings.search, yaml_data["search"])
             if "output" in yaml_data:
-                settings.output = OutputSettings(**yaml_data["output"])
+                settings.output = _merge_block(settings.output, yaml_data["output"], OutputSettings)
             if "limits" in yaml_data:
-                settings.limits = LimitSettings(**yaml_data["limits"])
+                settings.limits = _merge_block(settings.limits, yaml_data["limits"], LimitSettings)
             if "provider" in yaml_data:
                 settings.provider = ProviderDefaultSettings(**yaml_data["provider"])
             if "providers" in yaml_data:

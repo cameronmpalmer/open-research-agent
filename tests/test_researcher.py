@@ -495,6 +495,113 @@ def test_concurrent_scrape_filters_intra_batch_duplicates(monkeypatch):
     assert len(seen) == 1
 
 
+def test_batch_slice_never_scrapes_past_cap(monkeypatch):
+    """Submit only the remaining budget, not a whole extra batch.
+
+    cap=5, concurrency=4, 8 URLs: without the slice, batch two submits 4 more
+    and 8 scrape + LLM-extract calls run for 5 retained sources. Exactly 5
+    must run.
+    """
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "4")
+    scrapes: list[str] = []
+    extracts: list[str] = []
+
+    def fake_scrape(payload):
+        scrapes.append(payload["url"])
+        return f"# body {payload['url']}"
+
+    def fake_extract(**kwargs):
+        extracts.append(kwargs["url"])
+        return _fake_extract(**kwargs)
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", fake_extract)
+
+    sources, findings, seen = [], [], set()
+    params = {"urls_per_query": 8, "scrapes_per_query": 5}
+    urls = [f"https://example.org/p{i}" for i in range(8)]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, params, 8000, None, [], sources, findings, seen, {},
+        min_sources=50, query="q", intensity=4, model_name="m",
+    )
+
+    assert done is False
+    assert len(sources) == 5
+    assert len(scrapes) == 5, f"scrape invocations: {scrapes}"
+    assert len(extracts) == 5, f"extract invocations: {extracts}"
+
+
+def test_batch_advance_does_not_skip_urls_when_chunk_truncated(monkeypatch):
+    """A budget-truncated chunk must not make the next batch skip URLs.
+
+    width=3, cap=4, 8 URLs. The first chunk yields only 2 successes, so the
+    next chunk is truncated to 2 entries (remaining=2). Stepping the outer loop
+    by width would jump from index 3 to index 6 and silently skip index 5;
+    stepping by the consumed chunk length keeps it in scope. Index 7 is the only
+    URL left unattempted, and only because the cap was reached.
+    """
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "3")
+    attempted: list[int] = []
+
+    def fake_scrape(payload):
+        index = int(payload["url"].rsplit("/p", 1)[1])
+        attempted.append(index)
+        if index in (2, 3, 4):
+            raise RuntimeError("boom")
+        return f"# body {payload['url']}"
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", _fake_extract)
+
+    sources, findings, seen = [], [], set()
+    params = {"urls_per_query": 8, "scrapes_per_query": 4}
+    urls = [f"https://example.org/p{i}" for i in range(8)]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, params, 8000, None, [], sources, findings, seen, {},
+        min_sources=50, query="q", intensity=4, model_name="m",
+    )
+
+    assert done is False
+    assert len(sources) == 4
+    # Every needed index was attempted; only index 7 was skipped, and only
+    # because the per-query cap was reached.
+    assert set(attempted) == {0, 1, 2, 3, 4, 5, 6}, f"attempted: {sorted(attempted)}"
+    assert 5 in attempted, f"index 5 was skipped: {attempted}"
+    assert len(attempted) <= len(urls), f"overshot pending: {attempted}"
+
+
+def test_duplicate_url_submitted_once_even_when_first_attempt_fails(monkeypatch):
+    """Up-front dedupe skips a duplicate regardless of the first attempt.
+
+    Submitting the same URL twice in one concurrent batch would scrape it
+    twice at once, so a failed duplicate is deliberately not retried.
+    """
+    monkeypatch.setenv("ORA_RESEARCH_CONCURRENCY", "3")
+    calls: list[str] = []
+
+    def fake_scrape(payload):
+        calls.append(payload["url"])
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
+    monkeypatch.setattr("ora.tools.extract.extract_and_evaluate", _fake_extract)
+
+    sources, findings, seen = [], [], set()
+    urls = ["https://example.org/dup", "https://example.org/dup"]
+
+    done = researcher_mod._scrape_and_collect(
+        urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
+        sources, findings, seen, {}, min_sources=50, query="q", intensity=4,
+        model_name="m",
+    )
+
+    assert done is False
+    assert calls == ["https://example.org/dup"], f"duplicate retried: {calls}"
+    assert len(sources) == 0
+
+
 def test_research_concurrency_env_parsing(monkeypatch):
     monkeypatch.delenv("ORA_RESEARCH_CONCURRENCY", raising=False)
     assert researcher_mod._research_concurrency() == 4

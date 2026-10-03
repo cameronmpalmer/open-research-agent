@@ -1,7 +1,27 @@
-"""Web search tool for LangChain, with a Decodo primary and Firecrawl fallback."""
+"""Web search tool for LangChain, with a Decodo primary and Firecrawl fallback.
+
+The Decodo classification follows the documented Web Scraping API contract
+(https://help.decodo.com/docs/web-scraping-api-response-codes and
+https://help.decodo.com/docs/web-scraping-api-status-codes, verified live
+2026-10-02):
+
+* HTTP: ``200`` success; ``204`` job not complete, retry in a few seconds;
+  ``>= 400`` failure (``500``/``524``/``613`` are not billed, but any failure
+  still falls back when the fallback is enabled).
+* Body: top-level ``status == "failed"`` is a failure (for example the HTTP 200
+  ``status_code: 613`` envelope a no-results query returns); a top-level
+  ``status_code`` outside ``{200, 202}`` is a failure.
+* Per task: ``parse_status_code`` in ``{12000, 12004, 12005}`` is a usable
+  parse. When it is absent, ``content.status_code`` in ``{200, 12000}`` is the
+  fallback signal. A non-empty ``content.errors`` is a failure.
+* A successful ``parse: true`` ``google_search`` nests organic results at
+  ``content.results.results.organic`` (older shapes nest one level shallower or
+  put ``organic`` on ``content``). Organic items use ``desc`` for the snippet.
+"""
 
 import json
 import os
+import time
 
 import requests
 from langchain_core.tools import tool
@@ -10,13 +30,19 @@ from ora.config import SearchSettings, load_config
 
 _MAX_RESULTS = 5
 
-# Decodo reports its own parse status in content.status_code. Verified against
-# the live API (2026-10-01): a successful google_search response carries
-# content.status_code == 12000 (the entry-level status_code is the HTTP 200).
-# 200 is accepted too for older/other shapes; any other present value is a
-# provider failure. Treating "!= 200" as failure would misread every live
-# success, so the success set is explicit.
-_SUCCESS_CONTENT_STATUS = frozenset({200, 12000})
+# Decodo can answer HTTP 204 ("job not complete; retry in a few seconds") while
+# an async job finishes. Retry a small bounded number of times.
+_MAX_HTTP_CALLS = 3
+_RETRY_SLEEP_SECONDS = 3
+
+# Documented parser status codes meaning the parse is usable (complete or
+# partial). Everything else present (12002, 12003, 12006-12009) is a failure.
+# https://help.decodo.com/docs/web-scraping-api-status-codes
+_USABLE_PARSE_STATUS = frozenset({12000, 12004, 12005})
+# Documented top-level body status codes meaning the job itself succeeded.
+_TOP_LEVEL_SUCCESS_STATUS = frozenset({200, 202})
+# Fallback success set for content.status_code when parse_status_code is absent.
+_USABLE_CONTENT_STATUS = frozenset({200, 12000})
 
 
 def _non_empty_error(value: object) -> bool:
@@ -35,14 +61,71 @@ def _non_empty_error(value: object) -> bool:
     return False
 
 
-def _is_success_content_status(value: object) -> bool:
-    """Whether content.status_code denotes success (None means "not reported")."""
+def _parse_status_is_usable(value: object) -> bool | None:
+    """Usable per ``parse_status_code``: None when absent, else True/False."""
+    if value is None:
+        return None
+    try:
+        return int(value) in _USABLE_PARSE_STATUS  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+
+
+def _find_parse_status(content: dict) -> object | None:
+    """The parser status, looked up at content level or in its results dicts.
+
+    Observed live (2026-10-02): a successful ``google_search`` carries it at
+    ``content.results.parse_status_code``. Some shapes put it directly on
+    ``content`` (or one level deeper), so check all three.
+    """
+    candidates = [content.get("parse_status_code")]
+    outer = content.get("results")
+    if isinstance(outer, dict):
+        candidates.append(outer.get("parse_status_code"))
+        inner = outer.get("results")
+        if isinstance(inner, dict):
+            candidates.append(inner.get("parse_status_code"))
+    for value in candidates:
+        if value is not None:
+            return value
+    return None
+
+
+def _content_status_is_usable(value: object) -> bool:
+    """Fallback usability from content.status_code when parse_status_code is absent.
+
+    A missing status is treated as usable (not reported is not a failure).
+    """
     if value is None:
         return True
     try:
-        return int(value) in _SUCCESS_CONTENT_STATUS  # type: ignore[arg-type]
+        return int(value) in _USABLE_CONTENT_STATUS  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return False
+
+
+def _top_level_status_is_ok(value: object) -> bool:
+    """Whether a present top-level status_code is a documented success."""
+    if value is None:
+        return True
+    try:
+        return int(value) in _TOP_LEVEL_SUCCESS_STATUS  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+
+
+def _extract_organic(content: dict) -> list:
+    """Organic result list from the deepest nested container, else []."""
+    outer = content.get("results")
+    inner = outer.get("results") if isinstance(outer, dict) else None
+    for candidate in (
+        inner.get("organic") if isinstance(inner, dict) else None,
+        outer.get("organic") if isinstance(outer, dict) else None,
+        content.get("organic"),
+    ):
+        if isinstance(candidate, list):
+            return candidate
+    return []
 
 
 def _decodo_search(
@@ -67,87 +150,116 @@ def _decodo_search(
         }
     ).encode()
     try:
-        resp = requests.post(
-            settings.decodo_api_url,
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            auth=(username, password),
-            timeout=30,
-        )
+        resp = None
+        for attempt in range(_MAX_HTTP_CALLS):
+            resp = requests.post(
+                settings.decodo_api_url,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                auth=(username, password),
+                timeout=30,
+            )
+            if resp.status_code != 204:
+                break
+            if attempt < _MAX_HTTP_CALLS - 1:
+                # Documented: 204 means the job is not complete yet; retry.
+                time.sleep(_RETRY_SLEEP_SECONDS)
+        if resp is not None and resp.status_code == 204:
+            return [], f"decodo HTTP 204 (job not complete after {_MAX_HTTP_CALLS} calls)"
+        if resp is None:
+            return [], "decodo request failed: no response"
         if resp.status_code >= 400:
-            return [], f"decodo HTTP {resp.status_code}"
+            err = f"decodo HTTP {resp.status_code}"
+            try:
+                err_body = resp.json()
+            except Exception:  # noqa: BLE001
+                err_body = None
+            if isinstance(err_body, dict) and _non_empty_error(err_body.get("message")):
+                err += f": {err_body.get('message')}"
+            return [], err
         data = resp.json()
     except Exception as e:  # noqa: BLE001
         return [], f"decodo request failed: {e!s}"
 
     if not isinstance(data, dict):
         return [], f"decodo malformed response: {type(data).__name__}"
-    if data.get("status") == "failed":
-        return [], f"decodo status {data.get('status_code')}: {data.get('message')}"
     if "results" not in data:
+        # No task envelope: the documented no-results (613) and other error
+        # bodies put status/message here, so surface them rather than reading
+        # the body as an empty answer.
+        if data.get("status") == "failed":
+            return [], f"decodo status {data.get('status_code')}: {data.get('message')}"
+        if _non_empty_error(data.get("message")):
+            return [], f"decodo message: {data.get('message')}"
         return [], "decodo malformed response: no results key"
 
     entries = data["results"]
     if not isinstance(entries, list):
         return [], f"decodo malformed results: {type(entries).__name__}"
 
+    # Collect organic results and failure signals while parsing, then apply the
+    # precedence once, after the loop. One decision point keeps the two
+    # directions (results never fall back, failures always do) from drifting.
     out: list[dict] = []
+    failures: list[str] = []
     for entry in entries:
         if not isinstance(entry, dict):
+            failures.append("decodo task entry not an object")
             continue
-        content = entry.get("content") or {}
+        content = entry.get("content")
         if not isinstance(content, dict):
+            # Observed live: a missing Authorization header returns content as a
+            # raw HTML string, which is not a parse result.
+            failures.append("decodo content not an object")
             continue
-        # A 200 response can still carry a provider-side error, which Decodo
-        # nests at content.errors (older/fixture shapes use
-        # content.results.errors). Either, or a non-success content.status_code,
-        # is a provider failure: return an error so the Firecrawl fallback runs
-        # instead of reading it as a legitimate empty answer.
+        # Recorded, not short-circuited: valid organic results take precedence.
         if _non_empty_error(content.get("errors")):
-            return [], f"decodo content error: {content.get('errors')}"
-        error_outer = content.get("results") or {}
-        if isinstance(error_outer, dict) and _non_empty_error(error_outer.get("errors")):
-            return [], f"decodo results error: {error_outer.get('errors')}"
-        if not _is_success_content_status(content.get("status_code")):
-            return [], f"decodo content status {content.get('status_code')}"
-        # Decodo's parse:true response nests organic results by depth, and the
-        # live API (verified 2026-10-01) uses the two-level shape
-        # content.results.results.organic. Older/other responses use a single
-        # level (content.results.organic) or put organic directly on content,
-        # so accept all three, preferring the deeper (live) shape.
-        outer = content.get("results") or {}
-        if not isinstance(outer, dict):
-            outer = {}
-        inner = outer.get("results")
-        organic: object = None
-        for candidate in (
-            inner.get("organic") if isinstance(inner, dict) else None,
-            outer.get("organic"),
-            content.get("organic"),
-        ):
-            if isinstance(candidate, list) and candidate:
-                organic = candidate  # first non-empty list wins
-                break
-            if organic is None and isinstance(candidate, list):
-                organic = candidate  # remember an empty list as zero results
-        if not isinstance(organic, list):
-            organic = []
-        for item in organic[:limit]:
+            failures.append(f"decodo content error: {content.get('errors')}")
+        parse_status = _find_parse_status(content)
+        parse_usable = _parse_status_is_usable(parse_status)
+        if parse_usable is False:
+            failures.append(f"decodo parse_status_code {parse_status}")
+        elif parse_usable is None and not _content_status_is_usable(content.get("status_code")):
+            failures.append(f"decodo content status {content.get('status_code')}")
+        outer = content.get("results")
+        if isinstance(outer, dict) and _non_empty_error(outer.get("errors")):
+            failures.append(f"decodo results error: {outer.get('errors')}")
+        for item in _extract_organic(content)[:limit]:
             if not isinstance(item, dict):
                 continue
             out.append(
                 {
                     "title": item.get("title", ""),
                     "url": item.get("url", ""),
-                    # Live Decodo organic items use "desc"; some fixtures and
-                    # fallback shapes use "description".
-                    "description": item.get("description") or item.get("desc") or "",
+                    # Live Decodo organic items use "desc"; older fixtures used
+                    # "description", kept as a fallback key.
+                    "description": item.get("desc") or item.get("description") or "",
                 }
             )
-    return out[:limit], None
+
+    # The single classification decision, in precedence order.
+    # 1. Parsed organic results win; warnings/error markers beside them are
+    #    ignored, so a usable search is never thrown away or double-billed.
+    if out:
+        return out[:limit], None
+    # 2. A provider failure signal: an explicit error so _search can fall back.
+    if data.get("status") == "failed":
+        return [], f"decodo status {data.get('status_code')}: {data.get('message')}"
+    if not _top_level_status_is_ok(data.get("status_code")):
+        return [], f"decodo status {data.get('status_code')}: {data.get('message')}"
+    if failures:
+        return [], failures[0]
+    # Defensive extra signals, undocumented but harmless: only fire when nothing
+    # usable was parsed, so they cannot discard a good result.
+    if _non_empty_error(data.get("errors")):
+        return [], f"decodo error: {data.get('errors')}"
+    if _non_empty_error(data.get("message")):
+        return [], f"decodo message: {data.get('message')}"
+    # 3. No results and no failure signal: a legitimately empty parse.
+    return [], None
 
 
 def _firecrawl_search(

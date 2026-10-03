@@ -103,16 +103,19 @@ site bypasses the configured model.
 | `search.decodo_password_env` | `DECODO_PASSWORD` | Name of the env var holding the Decodo password |
 | `search.decodo_domain` | `com` | Google domain to search |
 | `search.decodo_locale` | `en-us` | Result locale |
-| `search.fallback_to_firecrawl` | `true` | On a Decodo *failure*, retry via Firecrawl |
+| `search.fallback_to_firecrawl` | `false` | Opt in to retrying a Decodo *failure* via Firecrawl |
 
 Decodo credentials are read from process env only and are never written to
 `config.yaml`; the two `*_env` settings name the variables to read. Enable
 Decodo with `search.provider: decodo` plus `DECODO_USERNAME` and
 `DECODO_PASSWORD` exported.
 
-The fallback is deliberate and narrow: a Decodo **failure** (bad credentials,
-HTTP error, provider-reported error, or a malformed body) retries via Firecrawl,
-but a successful search that simply found nothing is reported as
+The fallback is deliberate and narrow, and it is **off by default**: Firecrawl
+search is unreliable and in practice often returns nothing, so silently falling
+back would hide Decodo failures. Set `search.fallback_to_firecrawl: true` to
+opt in. When enabled, a Decodo **failure** (bad credentials, HTTP error,
+provider-reported error, or a malformed body) retries via Firecrawl; either way,
+a successful search that simply found nothing is reported as
 `No search results found.` and does **not** retry, so a quiet query is not
 double-billed. Scrape always uses Firecrawl regardless of `search.provider`.
 

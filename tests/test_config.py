@@ -21,6 +21,9 @@ class TestORASettings:
         settings = ORASettings()
         assert settings.models.default == "deepseek-v4-flash"
         assert settings.search.provider == "firecrawl"
+        # The Firecrawl fallback is opt-in; silently defaulting it on hides
+        # Decodo failures.
+        assert settings.search.fallback_to_firecrawl is False
         assert settings.limits.max_revisions == 3
         assert settings.limits.default_intensity == 2
         assert settings.deepseek_base_url == "https://api.deepseek.com"
@@ -106,6 +109,51 @@ class TestLoadConfig:
             f.flush()
             config = load_config(f.name)
             assert config.search.provider == "decodo"
+            os.unlink(f.name)
+
+    def test_yaml_models_block_preserves_env_default(self, monkeypatch):
+        """A partial models: block must not clobber ORA_MODELS__DEFAULT.
+
+        Replacing the whole block discarded the env default whenever the YAML
+        defined only a per-role override.
+        """
+        monkeypatch.setenv("ORA_MODELS__DEFAULT", "env-default-model")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("models:\n  researcher: yaml-researcher-model\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.models.default == "env-default-model"
+            assert config.models.researcher == "yaml-researcher-model"
+            os.unlink(f.name)
+
+    def test_yaml_output_block_preserves_env_key(self, monkeypatch):
+        monkeypatch.setenv("ORA_OUTPUT__ALWAYS_INCLUDE_SOURCES", "false")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("output:\n  default_format: html\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.output.always_include_sources is False
+            assert config.output.default_format == "html"
+            os.unlink(f.name)
+
+    def test_yaml_limits_block_preserves_env_key(self, monkeypatch):
+        monkeypatch.setenv("ORA_LIMITS__MAX_REVISIONS", "7")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("limits:\n  default_intensity: 4\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.limits.max_revisions == 7
+            assert config.limits.default_intensity == 4
+            os.unlink(f.name)
+
+    def test_yaml_blocks_still_override_env_for_keys_they_define(self, monkeypatch):
+        """YAML still wins for the keys it defines."""
+        monkeypatch.setenv("ORA_MODELS__DEFAULT", "env-default-model")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("models:\n  default: yaml-default-model\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.models.default == "yaml-default-model"
             os.unlink(f.name)
 
     def test_get_researcher_model_defaults_to_default(self):
@@ -245,8 +293,9 @@ def test_get_llm_passes_timeout_and_retries(monkeypatch):
     ora.config.get_llm("deepseek/deepseek-v4-flash", temperature=0)
 
     assert captured["max_retries"] == 2
-    timeout = captured.get("timeout", captured.get("request_timeout"))
-    assert timeout == 300.0
+    # Pin the canonical field name: "timeout" is only an alias, so accepting
+    # either would not catch a regression to the wrong kwarg.
+    assert captured["request_timeout"] == 300.0
 
 
 def test_get_llm_honours_configured_timeout_and_retries(monkeypatch):
@@ -270,8 +319,9 @@ def test_get_llm_honours_configured_timeout_and_retries(monkeypatch):
     ora.config.get_llm("deepseek/deepseek-v4-flash", temperature=0)
 
     assert captured["max_retries"] == 0
-    timeout = captured.get("timeout", captured.get("request_timeout"))
-    assert timeout == 42.5
+    # Pin the canonical field name: "timeout" is only an alias, so accepting
+    # either would not catch a regression to the wrong kwarg.
+    assert captured["request_timeout"] == 42.5
 
 
 class TestSplitProvider:
