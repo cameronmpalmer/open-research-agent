@@ -22,3 +22,6 @@ docs/
 # Benchmark runner artifacts (worktree files from feat/benchmark-runner)
 benchmarks/.bench-venv/
 benchmarks/results/
+
+# Local HuggingFace model cache (disposable, not source)
+/models/
