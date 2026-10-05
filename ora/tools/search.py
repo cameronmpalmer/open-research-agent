@@ -377,6 +377,51 @@ def _search(query: str, limit: int = _MAX_RESULTS) -> str:
     return f"Search error: {err}"
 
 
+_CREDENTIAL_PROBE_TIMEOUT = 15
+
+
+def validate_search_credentials(settings: SearchSettings) -> str | None:
+    """Return an error if the configured search credentials are unusable.
+
+    Performs one cheap probe request for Decodo so a rejected API key fails
+    before any research work starts. Decodo validates the credential before the
+    target, so a deliberately invalid target answers 401 for a bad key and 400
+    for a good one, and nothing is scraped. Returns None when there is nothing
+    to validate (another provider) or the credential is accepted; a network
+    problem is not treated as a bad key.
+    """
+    provider = (settings.provider or "firecrawl").lower()
+    if provider != "decodo":
+        return None
+
+    api_key = os.environ.get(settings.decodo_api_key_env, "").strip()
+    if not api_key:
+        return f"decodo credentials missing ({settings.decodo_api_key_env})"
+
+    body = json.dumps({"target": "__credential_probe__", "query": "probe"}).encode()
+    try:
+        resp = requests.post(
+            settings.decodo_api_url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": f"Basic {api_key}",
+            },
+            timeout=_CREDENTIAL_PROBE_TIMEOUT,
+        )
+    except Exception:  # noqa: BLE001
+        # A network problem is not an invalid key; let the run surface it.
+        return None
+
+    if resp.status_code in (401, 403):
+        return (
+            f"Search provider 'decodo' rejected {settings.decodo_api_key_env} "
+            f"(HTTP {resp.status_code}); check the API key"
+        )
+    return None
+
+
 @tool
 def web_search(query: str) -> str:
     """Search the web.

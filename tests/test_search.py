@@ -477,6 +477,61 @@ def test_decodo_missing_token_reports_the_env_var(monkeypatch):
     assert err and "DECODO_API_KEY" in err
 
 
+class TestValidateSearchCredentials:
+    """A live, pre-plan check that the configured search credentials work."""
+
+    def test_rejected_key_is_an_error(self, monkeypatch):
+        monkeypatch.setenv("DECODO_API_KEY", "definitely-wrong")
+        monkeypatch.setattr(
+            search_mod.requests, "post", lambda *a, **kw: FakeResp({"status": "failed"}, status=401)
+        )
+
+        err = search_mod.validate_search_credentials(_settings().search)
+
+        assert err and "DECODO_API_KEY" in err and "401" in err
+
+    def test_accepted_key_is_ok(self, monkeypatch):
+        """Decodo rejects the probe target with 400 once the credential is valid."""
+        monkeypatch.setenv("DECODO_API_KEY", "good-key")
+        monkeypatch.setattr(
+            search_mod.requests, "post", lambda *a, **kw: FakeResp({"status": "failed"}, status=400)
+        )
+
+        assert search_mod.validate_search_credentials(_settings().search) is None
+
+    def test_network_error_does_not_block(self, monkeypatch):
+        """A transient network problem is not an invalid key."""
+        monkeypatch.setenv("DECODO_API_KEY", "good-key")
+
+        def boom(*a, **kw):
+            raise OSError("network down")
+
+        monkeypatch.setattr(search_mod.requests, "post", boom)
+
+        assert search_mod.validate_search_credentials(_settings().search) is None
+
+    def test_missing_key_is_an_error(self, monkeypatch):
+        monkeypatch.setenv("DECODO_API_KEY", "")
+        called = []
+        monkeypatch.setattr(
+            search_mod.requests, "post", lambda *a, **kw: called.append(1) or FakeResp({}, status=400)
+        )
+
+        err = search_mod.validate_search_credentials(_settings().search)
+
+        assert err and "DECODO_API_KEY" in err
+        assert not called, "no request should be made without a key"
+
+    def test_non_decodo_provider_is_skipped(self, monkeypatch):
+        called = []
+        monkeypatch.setattr(
+            search_mod.requests, "post", lambda *a, **kw: called.append(1) or FakeResp({}, status=400)
+        )
+
+        assert search_mod.validate_search_credentials(_settings(provider="firecrawl").search) is None
+        assert not called, "firecrawl needs no credential probe"
+
+
 def test_malformed_payload_returns_error_not_raise(monkeypatch):
     monkeypatch.setenv("DECODO_API_KEY", "test-token")
 

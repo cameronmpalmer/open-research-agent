@@ -9,9 +9,9 @@ Search reliability and research throughput.
   Decodo dashboard, read from `DECODO_API_KEY`; username/password are not
   supported. Search failures are reported as errors rather than silently
   producing an empty result, and a run whose searches all fail now raises
-  instead of writing a blank report. `ora research` also refuses to start,
-  before generating a plan, when `search.provider: decodo` and
-  `DECODO_API_KEY` is unset. The Firecrawl fallback is off by default and must
+  instead of writing a blank report. `ora research` also validates the Decodo
+  key before generating a plan, failing fast when `DECODO_API_KEY` is unset or
+  rejected by the API. The Firecrawl fallback is off by default and must
   be opted into with `search.fallback_to_firecrawl: true`.
 - Firecrawl search honors the `FIRECRAWL_API_URL` env override again, matching
   scrape behavior and `CONFIG.md`.

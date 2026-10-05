@@ -200,6 +200,41 @@ class TestCLI:
         assert "DECODO_API_KEY" in result.output
         assert plan_graph_calls == [], "a plan was generated despite the missing Decodo key"
 
+    def test_research_refuses_to_start_when_decodo_key_is_rejected(self, monkeypatch):
+        """A key Decodo rejects must fail before a plan is generated."""
+        from ora import cli as cli_module
+        from ora.tools import search as search_mod
+
+        plan_graph_calls = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                plan_graph_calls.append(state)
+                return {"research_plan": "# Plan", "plan_approved": True, "messages": ["# Plan"]}
+
+        settings = _fake_settings()
+        settings.search = SimpleNamespace(
+            provider="decodo",
+            firecrawl_api_url="http://localhost:3002",
+            decodo_api_key_env="DECODO_API_KEY",
+            decodo_api_url="https://scraper-api.decodo.com/v2/scrape",
+        )
+        monkeypatch.setattr(cli_module, "load_config", lambda: settings)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setenv("DECODO_API_KEY", "wrong-key")
+        monkeypatch.setattr(
+            search_mod.requests,
+            "post",
+            lambda *a, **kw: SimpleNamespace(status_code=401, json=lambda: {"status": "failed"}),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "-y", "--no-save"])
+
+        assert result.exit_code != 0
+        assert "DECODO_API_KEY" in result.output
+        assert plan_graph_calls == [], "a plan was generated despite the rejected key"
+
     def test_research_default_passes_progress_callback(self, monkeypatch):
         from ora import cli as cli_module
 

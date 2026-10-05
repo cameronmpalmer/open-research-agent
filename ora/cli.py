@@ -198,6 +198,14 @@ def research(
     if config_error:
         raise click.ClickException(config_error)
 
+    # Presence is not correctness: confirm the credential is accepted before
+    # paying for a plan that would only fail once research starts.
+    from ora.tools.search import validate_search_credentials
+
+    credentials_error = validate_search_credentials(settings.search)
+    if credentials_error:
+        raise click.ClickException(credentials_error)
+
     researcher_model_name = model or settings.models.researcher or settings.models.default
     reviewer_model_name = reviewer_model or settings.models.reviewer or settings.models.default
     click.echo(
