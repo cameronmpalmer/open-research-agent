@@ -5,8 +5,8 @@
 Search reliability and research throughput.
 
 - New `decodo` search provider (`search.provider: decodo`), using Decodo's
-  Google SERP API. The credential is the single Basic-auth API token from the
-  Decodo dashboard, read from `DECODO_API_TOKEN`; username/password are not
+  Google SERP API. The credential is the single Basic-auth API key from the
+  Decodo dashboard, read from `DECODO_API_KEY`; username/password are not
   supported. Search failures are reported as errors rather than silently
   producing an empty result, and a run whose searches all fail now raises
   instead of writing a blank report. The Firecrawl fallback is off by default

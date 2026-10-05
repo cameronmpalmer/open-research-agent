@@ -16,7 +16,7 @@ import pytest
 from ora.agents.researcher import researcher_node
 from ora.state import ResearchState
 
-SEARCH_ERROR = "Search error: decodo credentials missing (DECODO_API_TOKEN)"
+SEARCH_ERROR = "Search error: decodo credentials missing (DECODO_API_KEY)"
 
 
 def _state(intensity=1, queries=("q1",)):

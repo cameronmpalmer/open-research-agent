@@ -150,9 +150,9 @@ def _decodo_search(
     usable parsed; otherwise the parse is a legitimate empty result
     (``([], None)``) and never triggers a fallback.
     """
-    token = os.environ.get(settings.decodo_token_env, "").strip()
-    if not token:
-        return [], f"decodo credentials missing ({settings.decodo_token_env})"
+    api_key = os.environ.get(settings.decodo_api_key_env, "").strip()
+    if not api_key:
+        return [], f"decodo credentials missing ({settings.decodo_api_key_env})"
     body = json.dumps(
         {
             "target": "google_search",
@@ -173,8 +173,8 @@ def _decodo_search(
                     "Content-Type": "application/json",
                     "Accept": "application/json",
                     # Decodo issues a single Basic-auth credential (the API
-                    # Playground token), which is the only accepted credential.
-                    "Authorization": f"Basic {token}",
+                    # Playground key), which is the only accepted credential.
+                    "Authorization": f"Basic {api_key}",
                 },
                 timeout=30,
             )

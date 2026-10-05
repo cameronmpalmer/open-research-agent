@@ -99,20 +99,20 @@ site bypasses the configured model.
 | `search.firecrawl_api_key` | (unset) | Firecrawl key; normally exported as `FIRECRAWL_API_KEY` instead |
 | `search.firecrawl_api_url` | `https://api.firecrawl.com` | Firecrawl endpoint; set to `http://localhost:3002` for self-hosted Firecrawl (key optional there) |
 | `search.decodo_api_url` | `https://scraper-api.decodo.com/v2/scrape` | Decodo SERP endpoint (`target: google_search`) |
-| `search.decodo_token_env` | `DECODO_API_TOKEN` | Name of the env var holding the Decodo Basic-auth API token |
+| `search.decodo_api_key_env` | `DECODO_API_KEY` | Name of the env var holding the Decodo Basic-auth API key |
 | `search.decodo_domain` | `com` | Google domain to search |
 | `search.decodo_locale` | `en-us` | Result locale |
 | `search.fallback_to_firecrawl` | `false` | Opt in to retrying a Decodo *failure* via Firecrawl |
 
 The Decodo credential is read from process env only and is never written to
 `config.yaml`; the `*_env` setting names the variable to read. Enable Decodo
-with `search.provider: decodo` plus `DECODO_API_TOKEN` exported. That token is
-the Basic-auth credential from the Decodo dashboard (API Playground), used
-verbatim as `Authorization: Basic <token>`. Username and password are
-deliberately **not** supported: the token is the credential Decodo issues, and
-storing the account password would expose a broader secret than the API needs.
-Basic auth base64 is encoding, not encryption, so treat the token as a bearer
-secret and rotate it from the dashboard.
+with `search.provider: decodo` plus `DECODO_API_KEY` exported. That key is the
+Basic-auth credential from the Decodo dashboard (API Playground), used verbatim
+as `Authorization: Basic <key>`. Username and password are deliberately **not**
+supported: the key is the credential Decodo issues, and storing the account
+password would expose a broader secret than the API needs. Basic auth base64 is
+encoding, not encryption, so treat the key as a bearer secret and rotate it
+from the dashboard.
 
 The fallback is deliberate and narrow, and it is **off by default**: Firecrawl
 search is unreliable and in practice often returns nothing, so silently falling
@@ -206,7 +206,7 @@ var to use) and are not loaded from a `.env` file.
 | `OPENAI_API_KEY` | Legacy fallback for deepseek when `DEEPSEEK_API_KEY` is unset |
 | `FIRECRAWL_API_KEY` | Search/scrape; overrides `search.firecrawl_api_key` |
 | `FIRECRAWL_API_URL` | Search/scrape endpoint; overrides `search.firecrawl_api_url` |
-| `DECODO_API_TOKEN` | Decodo Basic-auth API token (needed when `search.provider: decodo`) |
+| `DECODO_API_KEY` | Decodo Basic-auth API key (needed when `search.provider: decodo`) |
 | `ORA_RESEARCH_CONCURRENCY` | Parallel scrape+extract workers per query batch. Default `4`, clamped to a minimum of `1`, and capped by `scrapes_per_query`. Higher values finish research faster at the cost of more simultaneous Firecrawl and LLM requests. Not a `config.yaml` key. |
 
 ### ORA_ settings variables
