@@ -128,6 +128,24 @@ def _merge_search(base: SearchSettings, overrides: dict) -> SearchSettings:
     return _merge_block(base, overrides, SearchSettings)
 
 
+def search_config_error(settings: ORASettings) -> str | None:
+    """Return an error message if the configured search backend cannot run.
+
+    Called before any research work starts so a missing search credential fails
+    fast with a clear cause, rather than generating a plan and producing a
+    report with no sources. Returns None when the backend is usable.
+    """
+    provider = (settings.search.provider or "firecrawl").lower()
+    if provider == "decodo":
+        env_name = settings.search.decodo_api_key_env
+        if not os.environ.get(env_name, "").strip():
+            return (
+                f"Search provider 'decodo' requires {env_name} to be set; "
+                "set it, or choose another search.provider."
+            )
+    return None
+
+
 def load_config(config_path: str | None = None) -> ORASettings:
     """Load ORA configuration from YAML file and environment.
 

@@ -18,6 +18,7 @@ from ora.config import (
     get_reviewer_model,
     get_supervisor_model,
     load_config,
+    search_config_error,
     set_model_override,
 )
 from ora.usage import UsageCollector, usage_collection
@@ -190,6 +191,13 @@ def research(
     """Run the full research pipeline."""
     click.echo(f"ORA Research: {query}")
     settings = load_config()
+
+    # Fail before generating a plan: a search backend that cannot run would
+    # otherwise burn a plan and produce a report with no sources.
+    config_error = search_config_error(settings)
+    if config_error:
+        raise click.ClickException(config_error)
+
     researcher_model_name = model or settings.models.researcher or settings.models.default
     reviewer_model_name = reviewer_model or settings.models.reviewer or settings.models.default
     click.echo(

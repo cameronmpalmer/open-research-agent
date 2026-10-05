@@ -112,7 +112,8 @@ as `Authorization: Basic <key>`. Username and password are deliberately **not**
 supported: the key is the credential Decodo issues, and storing the account
 password would expose a broader secret than the API needs. Basic auth base64 is
 encoding, not encryption, so treat the key as a bearer secret and rotate it
-from the dashboard.
+from the dashboard. `ora research` validates this before doing any work and
+exits with an error rather than generating a plan when the key is missing.
 
 The fallback is deliberate and narrow, and it is **off by default**: Firecrawl
 search is unreliable and in practice often returns nothing, so silently falling

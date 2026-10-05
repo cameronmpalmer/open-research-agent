@@ -504,3 +504,45 @@ class TestProviderBlockMerge:
             assert config.providers["openrouter"].base_url == "http://x.example/v1"
             assert config.providers["openrouter"].api_key_env == "MY_KEY"
             os.unlink(f.name)
+
+
+class TestSearchConfigError:
+    """Fail-fast validation of the configured search backend."""
+
+    def test_decodo_without_key_is_an_error(self, monkeypatch):
+        from ora.config import ORASettings, search_config_error
+
+        monkeypatch.delenv("DECODO_API_KEY", raising=False)
+        settings = ORASettings()
+        settings.search.provider = "decodo"
+
+        err = search_config_error(settings)
+
+        assert err and "DECODO_API_KEY" in err
+
+    def test_decodo_with_key_is_ok(self, monkeypatch):
+        from ora.config import ORASettings, search_config_error
+
+        monkeypatch.setenv("DECODO_API_KEY", "some-key")
+        settings = ORASettings()
+        settings.search.provider = "decodo"
+
+        assert search_config_error(settings) is None
+
+    def test_decodo_key_whitespace_only_is_an_error(self, monkeypatch):
+        from ora.config import ORASettings, search_config_error
+
+        monkeypatch.setenv("DECODO_API_KEY", "   ")
+        settings = ORASettings()
+        settings.search.provider = "decodo"
+
+        assert search_config_error(settings) is not None
+
+    def test_firecrawl_needs_no_key(self, monkeypatch):
+        from ora.config import ORASettings, search_config_error
+
+        monkeypatch.delenv("DECODO_API_KEY", raising=False)
+        settings = ORASettings()
+        settings.search.provider = "firecrawl"
+
+        assert search_config_error(settings) is None
