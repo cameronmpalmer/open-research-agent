@@ -17,6 +17,7 @@ from ora.config import (
     get_researcher_model,
     get_reviewer_model,
     get_supervisor_model,
+    get_writer_model,
     load_config,
     search_config_error,
     set_model_override,
@@ -206,11 +207,19 @@ def research(
     if credentials_error:
         raise click.ClickException(credentials_error)
 
-    researcher_model_name = model or settings.models.researcher or settings.models.default
-    reviewer_model_name = reviewer_model or settings.models.reviewer or settings.models.default
-    click.echo(
-        f"  Intensity: {intensity} | Researcher: {researcher_model_name} | Reviewer: {reviewer_model_name}"
-    )
+    # CLI model flags become run-scoped config overrides before the banner and
+    # the plan are produced, so both reflect the flags. Every agent and internal
+    # helper resolves its model through the same config path.
+    if model:
+        set_model_override("researcher", model)
+    if reviewer_model:
+        set_model_override("reviewer", reviewer_model)
+
+    click.echo(f"  Intensity: {intensity}")
+    click.echo(f"  Supervisor: {get_supervisor_model(settings)}")
+    click.echo(f"  Researcher: {get_researcher_model(settings)}")
+    click.echo(f"  Writer:     {get_writer_model(settings)}")
+    click.echo(f"  Reviewer:   {get_reviewer_model(settings)}")
 
     from ora.graph import build_plan_graph, build_research_graph
 
@@ -301,12 +310,6 @@ def research(
     # the flag-unset path and the config default agree.
     effective_cap = max_revisions if max_revisions is not None else settings.limits.max_revisions
     plan_result["max_revisions"] = effective_cap
-    # CLI model flags become run-scoped config overrides so every agent and
-    # internal helper resolves them through the same config path.
-    if model:
-        set_model_override("researcher", model)
-    if reviewer_model:
-        set_model_override("reviewer", reviewer_model)
     try:
         if quiet:
             final_state = _spin(
@@ -473,7 +476,7 @@ def config(show, init):
     click.echo()
     click.echo(f"Supervisor (planning & routing): {get_supervisor_model(settings)}")
     click.echo(f"Researcher (web search & source eval): {get_researcher_model(settings)}")
-    click.echo(f"Writer (report synthesis): {get_researcher_model(settings)}")
+    click.echo(f"Writer (report synthesis): {get_writer_model(settings)}")
     click.echo(f"Reviewer (adversarial audit): {get_reviewer_model(settings)}")
     click.echo()
     click.echo(f"Search backend: {settings.search.provider}")

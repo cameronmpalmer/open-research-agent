@@ -63,7 +63,7 @@ class _RecordingLLM:
 
 def _patch_writer(monkeypatch, llm):
     monkeypatch.setattr(writer_module, "get_llm", lambda model_name, temperature=0.3: llm)
-    monkeypatch.setattr(writer_module, "get_researcher_model", lambda settings: "fake-model")
+    monkeypatch.setattr(writer_module, "get_writer_model", lambda settings: "fake-model")
 
 
 def _revision_state(**overrides) -> dict:

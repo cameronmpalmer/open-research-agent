@@ -12,6 +12,7 @@ from ora.config import (
     get_researcher_model,
     get_reviewer_model,
     get_supervisor_model,
+    get_writer_model,
     load_config,
 )
 
@@ -468,6 +469,53 @@ class TestRunModelOverrides:
         settings = ORASettings(models=ModelSettings(default="my-default"))
         set_model_override("researcher", "openrouter:qwen/qwen3.7-flash")
         assert get_supervisor_model(settings) == "my-default"
+
+
+class TestWriterModelResolution:
+    """The writer's model resolution (ora.config.get_writer_model).
+
+    The writer historically reused the researcher's model, so an unset
+    models.writer must keep resolving to whatever the researcher resolves to.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_overrides(self):
+        from ora.config import clear_model_overrides
+
+        yield
+        clear_model_overrides()
+
+    def test_writer_unset_falls_back_to_researcher(self):
+        """Backward compatibility: unset models.writer uses models.researcher."""
+        from ora.config import ModelSettings
+
+        settings = ORASettings(
+            models=ModelSettings(default="m-default", researcher="m-researcher")
+        )
+        assert get_writer_model(settings) == "m-researcher"
+
+    def test_writer_config_wins_over_researcher(self):
+        from ora.config import ModelSettings
+
+        settings = ORASettings(
+            models=ModelSettings(
+                default="m-default", researcher="m-researcher", writer="m-writer"
+            )
+        )
+        assert get_writer_model(settings) == "m-writer"
+
+    def test_writer_run_override_wins_over_config(self):
+        from ora.config import ModelSettings, set_model_override
+
+        settings = ORASettings(models=ModelSettings(default="m-default", writer="m-writer"))
+        set_model_override("writer", "openrouter:qwen/qwen3.7-flash")
+        assert get_writer_model(settings) == "openrouter:qwen/qwen3.7-flash"
+
+    def test_writer_defaults_to_default_when_nothing_set(self):
+        from ora.config import ModelSettings
+
+        settings = ORASettings(models=ModelSettings(default="m-default"))
+        assert get_writer_model(settings) == "m-default"
 
 
 class TestProviderBlockMerge:

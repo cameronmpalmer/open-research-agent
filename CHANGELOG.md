@@ -13,6 +13,12 @@ Search reliability and research throughput.
   key before generating a plan, failing fast when `DECODO_API_KEY` is unset or
   rejected by the API. The Firecrawl fallback is off by default and must
   be opted into with `search.fallback_to_firecrawl: true`.
+- `models.writer` is now a configuration setting, so all four agent roles
+  (supervisor, researcher, writer, reviewer) have their own model. An unset
+  writer keeps its previous behaviour and follows the researcher model.
+  `ora research` now prints the resolved model for all four roles before
+  generating the plan, so the supervisor model that writes the plan is no
+  longer hidden.
 - Firecrawl search honors the `FIRECRAWL_API_URL` env override again, matching
   scrape behavior and `CONFIG.md`.
 - Research now scrapes and extracts each query's URLs concurrently

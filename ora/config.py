@@ -41,6 +41,7 @@ class ModelSettings(BaseModel):
     default: str = "deepseek-v4-flash"
     researcher: str | None = None
     supervisor: str | None = None
+    writer: str | None = None
     reviewer: str | None = None
 
 
@@ -229,6 +230,22 @@ def get_researcher_model(settings: ORASettings) -> str:
 def get_supervisor_model(settings: ORASettings) -> str:
     """Get the supervisor model, falling back to the default model."""
     return settings.models.supervisor or settings.models.default
+
+
+def get_writer_model(settings: ORASettings) -> str:
+    """Get the writer model.
+
+    Resolution: a run override for "writer", else ``models.writer``, else the
+    researcher's resolution (the writer has always shared it, so an unset
+    writer keeps its previous behaviour), else the default.
+    """
+    return (
+        _run_model_overrides.get("writer")
+        or settings.models.writer
+        or _run_model_overrides.get("researcher")
+        or settings.models.researcher
+        or settings.models.default
+    )
 
 
 def get_reviewer_model(settings: ORASettings) -> str:

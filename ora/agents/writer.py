@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from ora.config import get_llm, get_researcher_model, load_config
+from ora.config import get_llm, get_writer_model, load_config
 from ora.progress import emit_progress
 from ora.prompts import REVISION_PROMPT, WRITER_PROMPT
 from ora.state import ResearchState
@@ -258,7 +258,7 @@ def writer_node(state: ResearchState, config: RunnableConfig | None = None) -> d
     writer_change_notes carries the LLM's per-item disposition.
     """
     settings = load_config()
-    model_name = get_researcher_model(settings)
+    model_name = get_writer_model(settings)
 
     llm = get_llm(model_name, temperature=0.3)
 

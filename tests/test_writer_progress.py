@@ -33,7 +33,7 @@ def test_writer_emits_progress_events(monkeypatch):
     llm = RecordingLLM()
 
     monkeypatch.setattr(writer_module, "get_llm", lambda model_name, temperature=0.3: llm)
-    monkeypatch.setattr(writer_module, "get_researcher_model", lambda settings: "fake-model")
+    monkeypatch.setattr(writer_module, "get_writer_model", lambda settings: "fake-model")
 
     result = writer_node(
         {
@@ -60,7 +60,7 @@ def test_writer_handles_llm_failure_with_progress_event(monkeypatch):
     llm = RecordingLLM(error=RuntimeError("boom"))
 
     monkeypatch.setattr(writer_module, "get_llm", lambda model_name, temperature=0.3: llm)
-    monkeypatch.setattr(writer_module, "get_researcher_model", lambda settings: "fake-model")
+    monkeypatch.setattr(writer_module, "get_writer_model", lambda settings: "fake-model")
 
     with pytest.raises(RuntimeError, match="boom"):
         writer_node(
@@ -89,7 +89,7 @@ def test_writer_handles_empty_findings_prompt(monkeypatch):
     llm = RecordingLLM()
 
     monkeypatch.setattr(writer_module, "get_llm", lambda model_name, temperature=0.3: llm)
-    monkeypatch.setattr(writer_module, "get_researcher_model", lambda settings: "fake-model")
+    monkeypatch.setattr(writer_module, "get_writer_model", lambda settings: "fake-model")
 
     result = writer_node(
         {

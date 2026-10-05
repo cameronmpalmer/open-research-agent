@@ -32,9 +32,11 @@ and legacy key, annotated:
 
 models:
   default: deepseek-v4-flash       # every role falls back to this
-  # Optional per-role overrides; any unset role uses models.default:
-  # researcher: <model>            # researcher agent, extractor, and writer
+  # Optional per-role overrides; any unset role uses models.default
+  # (an unset writer instead follows models.researcher):
+  # researcher: <model>            # researcher agent, query generation, extractor
   # supervisor: <model>            # planning; no CLI flag exists for this
+  # writer: <model>                # report synthesis
   # reviewer: <model>              # adversarial review (intensity 3+)
 
 search:
@@ -74,22 +76,25 @@ providers:
 ### models
 
 Which model each agent role uses. **`models.default` applies to every role**:
-an unset `researcher`, `supervisor`, or `reviewer` falls back to `default`.
+an unset `researcher`, `supervisor`, or `reviewer` falls back to `default`, and
+an unset `writer` falls back to the resolved researcher model.
 Model names may carry a `provider:model` prefix (see
 [Provider routing](#provider-routing)).
 
 | Key | Default | Used by |
 |---|---|---|
 | `models.default` | `deepseek-v4-flash` | Every role that has no explicit override |
-| `models.researcher` | (falls back to `models.default`) | Researcher agent, per-source extractor, and writer |
+| `models.researcher` | (falls back to `models.default`) | Researcher agent, query generation, per-source extractor |
 | `models.supervisor` | (falls back to `models.default`) | Supervisor (planning and routing); config only, no CLI flag |
+| `models.writer` | (falls back to `models.researcher`) | Writer (report synthesis) |
 | `models.reviewer` | (falls back to `models.default`) | Reviewer (intensity 3+); overridable with `--reviewer-model` |
 
-CLI overrides: `--model` sets the researcher + writer model for one run;
-`--reviewer-model` sets the reviewer model for one run. Overrides are
-run-scoped and applied at the config layer, so they cover every internal
-call (including gap-query generation and per-source extraction); no call
-site bypasses the configured model.
+CLI overrides: `--model` sets the researcher model for one run, and the writer
+follows it unless `models.writer` is set; `--reviewer-model` sets the reviewer
+model for one run. Overrides are run-scoped and applied at the config layer, so
+they cover every internal call (including gap-query generation and per-source
+extraction); no call site bypasses the configured model. `ora research` prints
+the resolved model for all four roles before generating the plan.
 
 ### search
 
@@ -225,6 +230,7 @@ Common examples:
 | Variable | Equivalent YAML |
 |---|---|
 | `ORA_MODELS__SUPERVISOR` | `models.supervisor` |
+| `ORA_MODELS__WRITER` | `models.writer` |
 | `ORA_MODELS__DEFAULT` | `models.default` |
 | `ORA_PROVIDER__DEFAULT` | `provider.default` |
 | `ORA_SEARCH__PROVIDER` | `search.provider` |
@@ -251,7 +257,7 @@ open-research-agent research "..." --model openrouter:anthropic/claude-3.5-sonne
 - An unknown provider prefix (e.g. `openai:gpt-4.1`) warns and falls back to
   the default provider, keeping the full name.
 - Each agent role can use a different provider by setting its `models.*`
-  entry with a prefix (supervisor via config only).
+  entry with a prefix (supervisor and writer via config only).
 
 ## Related
 

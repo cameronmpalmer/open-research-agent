@@ -17,6 +17,7 @@ def _fake_settings():
             default="deepseek-v4-flash",
             researcher="deepseek-v4-flash",
             supervisor="deepseek-v4-pro",
+            writer=None,
             reviewer="deepseek-v4-pro",
         ),
         search=SimpleNamespace(provider="firecrawl", firecrawl_api_url="https://api.firecrawl.com"),
@@ -298,6 +299,45 @@ class TestCLI:
 
         assert result.exit_code == 0
         assert received_configs == [None]
+
+    def test_research_banner_lists_all_four_roles(self, monkeypatch):
+        """The startup banner must name Supervisor, Researcher, Writer, and
+        Reviewer with their resolved models, not just Researcher and Reviewer."""
+        from ora import cli as cli_module
+
+        settings = _fake_settings()
+        settings.models = SimpleNamespace(
+            default="m-default",
+            researcher="m-researcher",
+            supervisor="m-supervisor",
+            writer="m-writer",
+            reviewer="m-reviewer",
+        )
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: settings)
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        # Cancel at the approval prompt so the real research phase never runs.
+        monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "C")
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "--intensity", "3", "--no-save"])
+
+        assert result.exit_code == 0
+        assert "Supervisor: m-supervisor" in result.output
+        assert "Researcher: m-researcher" in result.output
+        assert "Writer:     m-writer" in result.output
+        assert "Reviewer:   m-reviewer" in result.output
 
     def test_research_warns_when_reviewer_flags_are_ignored(self, monkeypatch):
         from ora import cli as cli_module
