@@ -156,6 +156,32 @@ def test_revision_mode_draft_keeps_fresh_programmatic_sections(monkeypatch):
     assert "New source. [https://example.com/new]" in draft[bibliography_idx:]
 
 
+def test_purely_programmatic_response_does_not_duplicate_sections(monkeypatch):
+    """A revision response whose pre-marker body strips to "" must not fall
+    back to the raw response: assembly keeps exactly one freshly built Source
+    Table and Bibliography instead of appending to the echoed ones."""
+    echoed = (
+        "## Source Table\n"
+        "| # | Title | URL | Type | Reliability |\n"
+        "|---|-------|-----|------|-------------|\n"
+        "| 1 | Old source | https://example.com/old | unknown | Medium |\n"
+        "\n"
+        "## Bibliography\n"
+        "1. Old source. [https://example.com/old](https://example.com/old)\n"
+    )
+    llm = _RecordingLLM(content=echoed)
+    _patch_writer(monkeypatch, llm)
+
+    result = writer_node(_revision_state())
+
+    draft = result["draft_report"]
+    assert draft.count("## Source Table") == 1
+    assert draft.count("## Bibliography") == 1
+    # The surviving sections are the fresh ones built from the current sources.
+    assert "New source | https://example.com/new" in draft
+    assert "New source. [https://example.com/new]" in draft
+
+
 def test_revision_mode_change_notes_survive_full_report_echo(monkeypatch):
     """When the LLM echoes the whole previous report (body + change notes +
     programmatic tail), writer_change_notes is still extracted and the

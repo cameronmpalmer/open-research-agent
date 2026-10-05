@@ -80,10 +80,14 @@ _ACKNOWLEDGED_MARKERS = ("resolved", "partially addressed", "documented as a gap
 def _notes_acknowledge_item(notes: str, text: str) -> bool:
     """True when the writer's change notes respond to the item.
 
-    The writer's change notes restate the exact item text with a disposition
-    marker (resolved / partially addressed / documented as a gap), so the
-    item text appearing in the notes means the writer acknowledged the item
-    in the updated report. Matching is normalized (strip + casefold).
+    The writer's change notes restate the item text together with a
+    disposition marker (resolved / partially addressed / documented as a
+    gap) on the same line, for example
+    "- [blocking] Add pricing details: resolved." An item whose text merely
+    appears somewhere in the notes (a near-duplicate the writer actually
+    addressed, say "Add pricing details" when the item is "Add pricing") is
+    not acknowledgment, so the item text must co-occur with a marker on one
+    line. Matching is normalized (strip + casefold).
     """
     if not notes or not text:
         return False
@@ -91,9 +95,6 @@ def _notes_acknowledge_item(notes: str, text: str) -> bool:
     norm_text = _norm_item_text(text)
     if not norm_text:
         return False
-    if norm_text in norm_notes:
-        return True
-    # Fallback: a disposition marker on the same line as the item text.
     return any(
         norm_text in line and any(marker in line for marker in _ACKNOWLEDGED_MARKERS)
         for line in norm_notes.splitlines()
@@ -187,11 +188,20 @@ def _carry_exhausted_items(
     """Carry previously-exhausted items forward as evidence_exhausted records.
 
     Items the reviewer neither re-raised this audit (so the fold decision did
-    not handle them), accepted into this verdict's unresolvable_gaps, nor had
-    acknowledged by the writer keep their evidence_exhausted record in
-    review_items. That keeps the repeat-raise guard multi-shot (history
-    survives into the next audit) and lets the writer see the item for
-    documentation; routing already ignores non-open statuses.
+    not handle them) nor accepted into this verdict's unresolvable_gaps keep
+    their evidence_exhausted record in review_items. That keeps the
+    repeat-raise guard multi-shot (history survives into the next audit) and
+    the record cannot silently disappear from structured state when the
+    reviewer fails to re-raise or accept a previously-exhausted item. The
+    writer acknowledging the item in its change notes is deliberately NOT
+    enough to drop it: an acknowledged item the reviewer neither re-raised nor
+    accepted would otherwise vanish from both review_items and
+    unresolvable_gaps, losing the CLI's open/exhausted accounting and any
+    downstream consumer of structured gaps. Routing already ignores non-open
+    statuses, so a carried record never schedules another researcher pass.
+
+    The ``writer_change_notes`` argument is retained so callers and tests can
+    supply the writer's dispositions (the contract this function guards).
     """
     if not previous_items:
         return []
@@ -206,8 +216,6 @@ def _carry_exhausted_items(
         if not norm:
             continue
         if norm in re_raised or norm in accepted:
-            continue
-        if _notes_acknowledge_item(writer_change_notes, text):
             continue
         carried.append(
             {
@@ -265,7 +273,10 @@ def reviewer_node(state: ResearchState, config: RunnableConfig = None) -> dict[s
     # else the MAX_REVISIONS constant) so the reviewer knows when it is at
     # its FINAL audit and must not REVISE for residual addressed/accepted
     # items. When audit_number == cap the reviewer is at its final audit.
-    cap = state.get("max_revisions") or MAX_REVISIONS
+    # An explicit None check, not truthiness: a wired-in 0 or negative budget
+    # must be honored as-is rather than silently raised to MAX_REVISIONS.
+    max_revisions = state.get("max_revisions")
+    cap = max_revisions if max_revisions is not None else MAX_REVISIONS
     audit_number = state.get("revision_count", 0) + 1
     prompt_text = REVIEWER_PROMPT.format(
         query=state.get("query", ""),

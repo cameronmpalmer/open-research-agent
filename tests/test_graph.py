@@ -1,5 +1,6 @@
 """Tests for graph assembly and routing."""
 
+import pytest
 from langgraph.graph import END, StateGraph
 
 from ora.agents.supervisor import (
@@ -184,6 +185,35 @@ class TestRouting:
             "review_verdict": ReviewVerdict(verdict="REVISE"),
             "revision_count": 5,
             "max_revisions": 5,
+            "review_items": [{"category": "blocking", "text": "add pricing", "status": "open"}],
+        }
+        assert route_after_reviewer(state) == "__end__"
+
+    @pytest.mark.parametrize("cap", [0, 1, 2])
+    def test_route_after_reviewer_honors_state_budget_exactly(self, cap):
+        """The wired-in budget is used as-is: at revision_count == cap the
+        loop ends, and below it an open item still routes. An explicit
+        absence check is required because ``cap or MAX_REVISIONS`` would
+        silently raise a wired-in 0 to 3."""
+        from ora.agents.supervisor import route_after_reviewer
+
+        base: ResearchState = {
+            "review_verdict": ReviewVerdict(verdict="REVISE"),
+            "max_revisions": cap,
+            "review_items": [{"category": "blocking", "text": "add pricing", "status": "open"}],
+        }
+        assert route_after_reviewer({**base, "revision_count": cap}) == "__end__"
+        if cap > 0:
+            assert route_after_reviewer({**base, "revision_count": cap - 1}) == "researcher"
+
+    def test_route_after_reviewer_dict_form_lowercase_pass_ends(self):
+        """A checkpointed lowercase dict verdict is normalized before
+        comparison: "pass" must end the loop, not be treated as a REVISE."""
+        from ora.agents.supervisor import route_after_reviewer
+
+        state: ResearchState = {
+            "review_verdict": {"verdict": "pass"},
+            "revision_count": 1,
             "review_items": [{"category": "blocking", "text": "add pricing", "status": "open"}],
         }
         assert route_after_reviewer(state) == "__end__"

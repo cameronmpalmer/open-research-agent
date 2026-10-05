@@ -174,6 +174,22 @@ class TestFoldRepeatedExhausted:
         assert verdict.blocking == ["X"]
         assert verdict.unresolvable_gaps == []
 
+    def test_marker_less_mention_does_not_acknowledge(self):
+        """A marker-less mention of the item text is not acknowledgment: a
+        near-duplicate in the notes must not fold a non-final, undocumented
+        item out of blocking/required into gaps."""
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["Add pricing"]),
+            self._exhausted("Add pricing"),
+            writer_change_notes="## Changes made\n- Add pricing details: no action taken.\n",
+            is_final_audit=False,
+        )
+
+        assert verdict.blocking == ["Add pricing"]
+        assert verdict.unresolvable_gaps == []
+
     def test_exhausted_undocumented_final_audit_folds(self):
         from ora.agents.reviewer import _fold_repeated_exhausted
 
@@ -294,9 +310,10 @@ class TestFoldRepeatedExhausted:
 
 
 class TestCarryExhaustedItems:
-    """Previously-exhausted items the reviewer neither re-raised, accepted
-    into gaps, nor had acknowledged by the writer carry forward as
-    evidence_exhausted records so history survives into the next audit."""
+    """Previously-exhausted items the reviewer neither re-raised nor accepted
+    into gaps carry forward as evidence_exhausted records so history survives
+    into the next audit. Acknowledgment by the writer alone does not drop the
+    record: only acceptance into this verdict's unresolvable_gaps does."""
 
     def _exhausted(self, text="X"):
         return [{"category": "required", "text": text, "status": "evidence_exhausted"}]
@@ -342,7 +359,10 @@ class TestCarryExhaustedItems:
 
         assert carried == []
 
-    def test_writer_acknowledged_item_is_not_carried(self):
+    def test_acknowledged_item_still_carried_when_not_accepted(self):
+        """Acknowledgment alone must not drop the record: if the reviewer did
+        not also accept the item into unresolvable_gaps, it is still carried
+        as evidence_exhausted so it cannot vanish from structured state."""
         from ora.agents.reviewer import _carry_exhausted_items
         from ora.state import ReviewVerdict
 
@@ -352,7 +372,7 @@ class TestCarryExhaustedItems:
             writer_change_notes=self._notes_for(),
         )
 
-        assert carried == []
+        assert carried == [{"category": "required", "text": "X", "status": "evidence_exhausted"}]
 
     def test_open_previous_items_are_never_carried(self):
         from ora.agents.reviewer import _carry_exhausted_items
@@ -558,7 +578,14 @@ class TestReviewerNodeRevisionAudit:
                     " still omits pricing"
                 ),
                 "status": "open",
-            }
+            },
+            # The writer acknowledged the 2026 item but the reviewer neither
+            # re-raised nor accepted it: the record is carried, not dropped.
+            {
+                "category": "required",
+                "text": "2026 outlook unavailable in sources",
+                "status": "evidence_exhausted",
+            },
         ]
         assert result["revision_count"] == 2
 
@@ -742,6 +769,49 @@ class TestReviewerNodeRevisionAudit:
         assert phase2["review_verdict"].verdict == "PASS"
         assert phase2["review_verdict"].unresolvable_gaps == [gap_item]
         assert phase2["review_items"] == []
+
+    def test_acknowledged_item_not_rerisen_or_accepted_survives_audit(self, monkeypatch):
+        """Acknowledged + not re-raised + not accepted: the exhausted item
+        must still be present in structured state as an evidence_exhausted
+        record rather than silently disappearing from both review_items and
+        unresolvable_gaps."""
+        from ora.agents import reviewer as reviewer_module
+        from ora.agents.reviewer import reviewer_node
+
+        gap_item = "2026 outlook unavailable in sources"
+        pass_with_other_gap = (
+            '{"verdict": "PASS", "blocking": [], "required": [], "suggested": [],'
+            ' "contradicting_evidence_found": [], "confidence_recalibrations": {},'
+            ' "unresolvable_gaps": ["unrelated accepted gap"]}'
+        )
+        llm = _AuditRecordingLLM([pass_with_other_gap])
+        monkeypatch.setattr(
+            reviewer_module,
+            "get_llm",
+            lambda model_name, temperature=0.2: llm,
+        )
+
+        result = reviewer_node(
+            {
+                "query": "Rust vs Go",
+                "draft_report": "# Research\nrevised body",
+                "review_items": [
+                    {"category": "required", "text": gap_item, "status": "evidence_exhausted"}
+                ],
+                # The writer acknowledged the item in its notes...
+                "writer_change_notes": (
+                    f"## Changes made\n- [required] {gap_item}: documented as a gap.\n"
+                ),
+                # ...but the reviewer neither re-raised it nor accepted it.
+                "revision_count": 1,
+            }
+        )
+
+        assert result["review_verdict"].verdict == "PASS"
+        assert result["review_verdict"].unresolvable_gaps == ["unrelated accepted gap"]
+        assert result["review_items"] == [
+            {"category": "required", "text": gap_item, "status": "evidence_exhausted"}
+        ]
 
     def test_first_audit_defaults_context_placeholders(self, monkeypatch):
         """A first audit (no review_items/notes/deltas) renders the context

@@ -33,14 +33,19 @@ def _verdict_value(state: ResearchState) -> str:
     """Return the review verdict string from state, tolerating both a
     ReviewVerdict model and its dict form (e.g. from a checkpoint).
 
+    The value is normalized to upper case before comparison so a
+    checkpointed lowercase "pass" is not misread as a revision request.
+
     Falls back to "REVISE" when the recorded verdict carries no readable
     value, matching the pre-existing routing assumption that a review object
     without a PASS verdict is a revision request.
     """
     verdict = state.get("review_verdict")
     if isinstance(verdict, dict):
-        return verdict.get("verdict", "REVISE")
-    return getattr(verdict, "verdict", "REVISE")
+        raw = verdict.get("verdict", "REVISE")
+    else:
+        raw = getattr(verdict, "verdict", "REVISE")
+    return str(raw).upper() if raw else "REVISE"
 
 
 def _search_queries_fence_found(plan_text: str) -> bool:
@@ -169,8 +174,11 @@ def route_after_reviewer(state: ResearchState) -> Literal["researcher", "__end__
     revision_count = state.get("revision_count", 0)
     # The routing budget is the state's max_revisions when the CLI/config
     # wired one in; otherwise the module constant (3). Both default to 3, so
-    # a state without the key keeps the historical cap.
-    cap = state.get("max_revisions") or MAX_REVISIONS
+    # a state without the key keeps the historical cap. An explicit None
+    # check, not truthiness, so a wired-in 0 or negative budget is honored
+    # as-is instead of being silently raised to MAX_REVISIONS.
+    max_revisions = state.get("max_revisions")
+    cap = max_revisions if max_revisions is not None else MAX_REVISIONS
 
     if v == "PASS":
         return "__end__"

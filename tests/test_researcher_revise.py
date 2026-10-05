@@ -215,6 +215,32 @@ class TestResearcherNodeExhaustion:
         assert result["review_items"]
         assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
 
+    def test_exhaustion_returns_copies_without_mutating_caller_state(self, monkeypatch):
+        """The exhaustion pass returns updated dicts; the caller's shared
+        review_items (checkpointed graph state) must not be mutated in place."""
+        state = _revise_state(
+            sources=[Source(url="https://example.com/0", title="Source 0")],
+            search_queries=["plan query one", "plan query two"],
+            executed_queries=[],
+        )
+        monkeypatch.setattr(
+            "ora.tools.search.web_search",
+            _FakeTool("No results matched your search."),
+        )
+        monkeypatch.setattr(
+            "ora.agents.researcher.get_llm",
+            lambda *a, **kw: _FakeLLM("plan query one\n"),
+        )
+        monkeypatch.setattr(
+            "ora.agents.researcher.generate_gap_queries", lambda query, intensity: []
+        )
+
+        result = researcher_node(state)
+
+        assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
+        # The caller's objects are untouched: only the returned copies changed.
+        assert all(item["status"] == "open" for item in state["review_items"])
+
     def test_revise_single_item_query_round_keeps_items_open(self, monkeypatch):
         """Regression guard: with only ONE fresh item-targeted query to
         search, the >= 2 exhaustion floor is not reached, so a zero-yield

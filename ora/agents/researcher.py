@@ -490,16 +490,12 @@ def _scrape_and_extract_one(
                 f"reliability={extraction.source_reliability}"
             )
         else:
-            source = evaluate_source(
-                url=url, title=title, content=content, source_type="unknown"
-            )
+            source = evaluate_source(url=url, title=title, content=content, source_type="unknown")
             extraction = None
             claim_text = content[:500]
     except Exception as e:  # noqa: BLE001
         out["log"].append(f"  Source eval failed from {url[:60]}: {e}")
-        out["events"].append(
-            (f"Researcher: source evaluation failed for {display_url}", "error")
-        )
+        out["events"].append((f"Researcher: source evaluation failed for {display_url}", "error"))
         source = Source(
             url=url,
             title="",
@@ -526,7 +522,6 @@ def _scrape_and_collect(
     findings: list,
     seen_urls: set[str],
     url_titles: dict[str, str],
-    *_,
     min_sources: int,
     query: str = "",
     intensity: int = 2,
@@ -938,9 +933,13 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
         and (len(sources) - start_sources) == 0
         and len(pass_executed_queries) >= 2
     ):
-        for item in review_items:
-            if item.get("status") == "open":
-                item["status"] = "evidence_exhausted"
+        # Build fresh dicts instead of mutating the caller's state in place:
+        # review_items may be shared with the checkpointed graph state, and
+        # in-place writes leak the new statuses back to the caller.
+        review_items = [
+            {**item, "status": "evidence_exhausted"} if item.get("status") == "open" else {**item}
+            for item in review_items
+        ]
 
     if not findings:
         results_text = web_search.invoke({"query": query})

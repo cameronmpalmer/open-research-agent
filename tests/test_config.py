@@ -56,6 +56,21 @@ class TestLoadConfig:
             assert config.limits.max_revisions == 5
             os.unlink(f.name)
 
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_yaml_limits_max_revisions_below_floor_is_rejected(self, value):
+        """Out-of-range limits.max_revisions fails loudly at load instead of
+        being silently raised to 3 (0) or disabling revisions (negative)."""
+        from pydantic import ValidationError
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(f"limits:\n  max_revisions: {value}\n")
+            f.flush()
+            try:
+                with pytest.raises(ValidationError):
+                    load_config(f.name)
+            finally:
+                os.unlink(f.name)
+
     def test_yaml_llm_bounds_surface_on_settings(self, monkeypatch):
         monkeypatch.delenv("ORA_LLM_TIMEOUT_SECONDS", raising=False)
         monkeypatch.delenv("ORA_LLM_MAX_RETRIES", raising=False)

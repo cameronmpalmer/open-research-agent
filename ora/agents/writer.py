@@ -189,9 +189,13 @@ def _assemble_draft(header: str, llm_body: str, sources: list) -> str:
 
     The LLM body may still contain programmatic sections if a revision-mode
     response echoed the previous draft; strip them so the source table and
-    bibliography are always rebuilt fresh from the current sources.
+    bibliography are always rebuilt fresh from the current sources. When the
+    response is purely programmatic (the pre-marker body strips to ""), the
+    body is left empty rather than falling back to the raw response: keeping
+    the raw response would re-introduce the programmatic sections and
+    duplicate the freshly built ones.
     """
-    body = _strip_programmatic_sections(llm_body) or llm_body.strip()
+    body = _strip_programmatic_sections(llm_body)
     source_table = _build_source_table(sources)
     bibliography = _build_bibliography(sources)
     return header + "\n" + body + "\n" + source_table + "\n" + bibliography

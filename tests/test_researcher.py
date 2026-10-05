@@ -312,9 +312,7 @@ class _FakeTool:
 def _fake_extract(**kwargs):
     return (
         Source(url=kwargs["url"], title="", source_type="unknown"),
-        SourceExtraction(
-            summary="s", key_claims=["k1"], source_reliability="High"
-        ),
+        SourceExtraction(summary="s", key_claims=["k1"], source_reliability="High"),
     )
 
 
@@ -353,12 +351,23 @@ def test_concurrent_scrape_keeps_order_and_overlaps(monkeypatch):
     urls = [f"https://example.org/p{i}" for i in range(6)]
 
     done = researcher_mod._scrape_and_collect(
-        urls, params, 8000, None, [], sources, findings, seen, {},
-        min_sources=50, query="q", intensity=4, model_name="m",
+        urls,
+        params,
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=50,
+        query="q",
+        intensity=4,
+        model_name="m",
     )
 
-    assert done is False                      # 6 sources < min_sources=50
-    assert [s.url for s in sources] == urls   # submission order preserved
+    assert done is False  # 6 sources < min_sources=50
+    assert [s.url for s in sources] == urls  # submission order preserved
     assert len(findings) == 6
     assert active["max"] >= 2, "barrier proved fewer than 2 concurrent workers"
     assert active["max"] <= 3, "concurrency knob not respected"
@@ -378,8 +387,19 @@ def test_concurrent_scrape_stops_at_min_sources(monkeypatch):
     urls = [f"https://example.org/p{i}" for i in range(8)]
 
     done = researcher_mod._scrape_and_collect(
-        urls, params, 8000, None, [], sources, findings, seen, {},
-        min_sources=2, query="q", intensity=4, model_name="m",
+        urls,
+        params,
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=2,
+        query="q",
+        intensity=4,
+        model_name="m",
     )
 
     assert done is True
@@ -403,8 +423,18 @@ def test_min_sources_early_return_marks_dropped_urls_seen(monkeypatch):
     urls = [f"https://example.org/p{i}" for i in range(4)]
 
     done = researcher_mod._scrape_and_collect(
-        urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
-        sources, findings, seen, {}, min_sources=1, query="q", intensity=4,
+        urls,
+        {"urls_per_query": 8, "scrapes_per_query": 8},
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=1,
+        query="q",
+        intensity=4,
         model_name="m",
     )
 
@@ -428,12 +458,23 @@ def test_concurrent_scrape_respects_scrapes_per_query_cap(monkeypatch):
     urls = [f"https://example.org/p{i}" for i in range(6)]
 
     done = researcher_mod._scrape_and_collect(
-        urls, params, 8000, None, [], sources, findings, seen, {},
-        min_sources=50, query="q", intensity=4, model_name="m",
+        urls,
+        params,
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=50,
+        query="q",
+        intensity=4,
+        model_name="m",
     )
 
     assert done is False
-    assert len(sources) == 4                  # per-query cap still enforced
+    assert len(sources) == 4  # per-query cap still enforced
     assert [s.url for s in sources] == urls[:4]
 
 
@@ -456,8 +497,19 @@ def test_concurrent_scrape_cap_guard_prevents_batch_overshoot(monkeypatch):
     urls = [f"https://example.org/p{i}" for i in range(6)]
 
     done = researcher_mod._scrape_and_collect(
-        urls, params, 8000, None, [], sources, findings, seen, {},
-        min_sources=50, query="q", intensity=4, model_name="m",
+        urls,
+        params,
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=50,
+        query="q",
+        intensity=4,
+        model_name="m",
     )
 
     assert done is False
@@ -493,8 +545,18 @@ def test_concurrent_scrape_worker_failure_does_not_abort_batch(monkeypatch):
     urls = [f"https://example.org/p{i}" for i in range(3)]
 
     done = researcher_mod._scrape_and_collect(
-        urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
-        sources, findings, seen, {}, min_sources=50, query="q", intensity=4,
+        urls,
+        {"urls_per_query": 8, "scrapes_per_query": 8},
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=50,
+        query="q",
+        intensity=4,
         model_name="m",
     )
 
@@ -529,8 +591,18 @@ def test_concurrent_scrape_evaluation_failure_keeps_low_finding(monkeypatch):
     urls = [f"https://example.org/p{i}" for i in range(3)]
 
     done = researcher_mod._scrape_and_collect(
-        urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
-        sources, findings, seen, {}, min_sources=50, query="q", intensity=4,
+        urls,
+        {"urls_per_query": 8, "scrapes_per_query": 8},
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=50,
+        query="q",
+        intensity=4,
         model_name="m",
     )
 
@@ -556,8 +628,18 @@ def test_concurrent_scrape_filters_intra_batch_duplicates(monkeypatch):
     urls = ["https://example.org/dup", "https://example.org/dup"]
 
     done = researcher_mod._scrape_and_collect(
-        urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
-        sources, findings, seen, {}, min_sources=50, query="q", intensity=4,
+        urls,
+        {"urls_per_query": 8, "scrapes_per_query": 8},
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=50,
+        query="q",
+        intensity=4,
         model_name="m",
     )
 
@@ -594,8 +676,19 @@ def test_batch_slice_never_scrapes_past_cap(monkeypatch):
     urls = [f"https://example.org/p{i}" for i in range(8)]
 
     done = researcher_mod._scrape_and_collect(
-        urls, params, 8000, None, [], sources, findings, seen, {},
-        min_sources=50, query="q", intensity=4, model_name="m",
+        urls,
+        params,
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=50,
+        query="q",
+        intensity=4,
+        model_name="m",
     )
 
     assert done is False
@@ -631,8 +724,19 @@ def test_batch_advance_does_not_skip_urls_when_chunk_truncated(monkeypatch):
     urls = [f"https://example.org/p{i}" for i in range(8)]
 
     done = researcher_mod._scrape_and_collect(
-        urls, params, 8000, None, [], sources, findings, seen, {},
-        min_sources=50, query="q", intensity=4, model_name="m",
+        urls,
+        params,
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=50,
+        query="q",
+        intensity=4,
+        model_name="m",
     )
 
     assert done is False
@@ -664,8 +768,18 @@ def test_duplicate_url_submitted_once_even_when_first_attempt_fails(monkeypatch)
     urls = ["https://example.org/dup", "https://example.org/dup"]
 
     done = researcher_mod._scrape_and_collect(
-        urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
-        sources, findings, seen, {}, min_sources=50, query="q", intensity=4,
+        urls,
+        {"urls_per_query": 8, "scrapes_per_query": 8},
+        8000,
+        None,
+        [],
+        sources,
+        findings,
+        seen,
+        {},
+        min_sources=50,
+        query="q",
+        intensity=4,
         model_name="m",
     )
 
@@ -708,9 +822,7 @@ def test_usage_collection_survives_concurrency(monkeypatch):
             collector.record(_FakeUsageResponse())
         return (
             Source(url=kwargs["url"], title="", source_type="unknown"),
-            SourceExtraction(
-                summary="s", key_claims=["k1"], source_reliability="High"
-            ),
+            SourceExtraction(summary="s", key_claims=["k1"], source_reliability="High"),
         )
 
     monkeypatch.setattr("ora.tools.scrape.scrape_page", _FakeTool(fake_scrape))
@@ -721,8 +833,18 @@ def test_usage_collection_survives_concurrency(monkeypatch):
     sources, findings, seen = [], [], set()
     with usage_collection(collector):
         researcher_mod._scrape_and_collect(
-            urls, {"urls_per_query": 8, "scrapes_per_query": 8}, 8000, None, [],
-            sources, findings, seen, {}, min_sources=50, query="q", intensity=4,
+            urls,
+            {"urls_per_query": 8, "scrapes_per_query": 8},
+            8000,
+            None,
+            [],
+            sources,
+            findings,
+            seen,
+            {},
+            min_sources=50,
+            query="q",
+            intensity=4,
             model_name="m",
         )
 

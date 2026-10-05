@@ -37,9 +37,7 @@ class UsageCollector:
         "prompt_cache_hit_tokens",
         "cache_read",
     )
-    _lock: threading.Lock = field(
-        default_factory=threading.Lock, repr=False, compare=False
-    )
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def record(self, response: Any) -> None:
         """Record usage from an LLM response (AIMessage or similar)."""

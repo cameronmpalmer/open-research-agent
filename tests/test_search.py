@@ -130,9 +130,7 @@ def test_decodo_single_level_nesting(monkeypatch):
                 "content": {
                     "results": {
                         "parse_status_code": 12000,
-                        "organic": [
-                            {"title": "One", "url": "https://one.example", "desc": "one"}
-                        ],
+                        "organic": [{"title": "One", "url": "https://one.example", "desc": "one"}],
                     }
                 }
             }
@@ -153,9 +151,7 @@ def test_decodo_organic_on_content(monkeypatch):
             {
                 "content": {
                     "parse_status_code": 12000,
-                    "organic": [
-                        {"title": "Direct", "url": "https://direct.example", "desc": "d"}
-                    ],
+                    "organic": [{"title": "Direct", "url": "https://direct.example", "desc": "d"}],
                 }
             }
         ]
@@ -215,9 +211,7 @@ def test_decodo_613_no_results_envelope_fallback_disabled(monkeypatch):
 
     def fake_post(url, **kw):
         called.append(url)
-        return FakeResp(
-            {"status": "failed", "status_code": 613, "message": "not able to scrape"}
-        )
+        return FakeResp({"status": "failed", "status_code": 613, "message": "not able to scrape"})
 
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
     out = search_mod._search("q", 5)
@@ -230,9 +224,7 @@ def test_decodo_204_then_200_retries(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
     monkeypatch.setenv("DECODO_USERNAME", "u")
     monkeypatch.setenv("DECODO_PASSWORD", "p")
-    responses = iter(
-        [FakeResp({}, status=204), FakeResp(_live_payload(LIVE_ORGANIC), status=200)]
-    )
+    responses = iter([FakeResp({}, status=204), FakeResp(_live_payload(LIVE_ORGANIC), status=200)])
     counts = {"post": 0, "sleep": 0}
 
     def fake_post(url, **kw):
