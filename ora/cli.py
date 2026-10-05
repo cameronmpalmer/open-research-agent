@@ -474,7 +474,7 @@ def config(show, init):
     settings = load_config()
     click.echo(f"Config file: {config_path}")
     click.echo()
-    click.echo(f"Supervisor (planning & routing): {get_supervisor_model(settings)}")
+    click.echo(f"Supervisor (planning): {get_supervisor_model(settings)}")
     click.echo(f"Researcher (web search & source eval): {get_researcher_model(settings)}")
     click.echo(f"Writer (report synthesis): {get_writer_model(settings)}")
     click.echo(f"Reviewer (adversarial audit): {get_reviewer_model(settings)}")

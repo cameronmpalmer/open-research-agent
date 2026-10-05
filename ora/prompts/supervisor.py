@@ -22,13 +22,16 @@ Create a research plan with:
 Output the plan in clear markdown.
 
 At the very end of your response, after all other content, output the exact search queries
-you would use to research this topic as a JSON array in a code fence. Use the format below
-exactly (include the language tag):
+you would use to research this topic as a single JSON array in a code fence.
+Include the language tag shown below. This example contains three queries;
+your response must contain exactly {count} queries:
 
 ```search_queries
-["keyword query 1", "keyword query 2", ...]
+["keyword query 1", "keyword query 2", "keyword query 3"]
 ```
 
+The code fence must contain exactly ONE JSON array holding all {count} queries as
+comma-separated strings. Do not output one array per query or one array per line.
 Generate exactly {count} queries. Each query must be 3-7 targeted keywords suitable
 for a web search engine (Google, Firecrawl). Focus on specific product names,
 technologies, comparison angles, and key concepts. No full sentences, no questions,
@@ -48,13 +51,16 @@ User feedback:
 Output the revised plan in clear markdown.
 
 At the very end of your response, after all other content, output the exact search queries
-you would use to research this topic as a JSON array in a code fence. Use the format below
-exactly (include the language tag):
+you would use to research this topic as a single JSON array in a code fence.
+Include the language tag shown below. This example contains three queries;
+your response must contain exactly {count} queries:
 
 ```search_queries
-["keyword query 1", "keyword query 2", ...]
+["keyword query 1", "keyword query 2", "keyword query 3"]
 ```
 
+The code fence must contain exactly ONE JSON array holding all {count} queries as
+comma-separated strings. Do not output one array per query or one array per line.
 Generate exactly {count} queries. Each query must be 3-7 targeted keywords suitable
 for a web search engine (Google, Firecrawl). Focus on specific product names,
 technologies, comparison angles, and key concepts. No full sentences, no questions,

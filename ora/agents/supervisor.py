@@ -1,5 +1,6 @@
 """Supervisor agent node for LangGraph."""
 
+import ast
 import json
 import re
 from typing import Any, Literal
@@ -54,31 +55,57 @@ def _search_queries_fence_found(plan_text: str) -> bool:
     return bool(_FENCE_RE.search(plan_text))
 
 
-def _extract_search_queries(plan_text: str) -> list[str]:
-    """Extract JSON search queries from supervisor response code fence.
+def _parse_query_list(text: str) -> list[str] | None:
+    """Parse one text blob into a list of strings, or return None.
 
-    Returns empty list on any failure (no fence, bad JSON, wrong type).
+    Tries JSON first, then Python literal eval (LLMs sometimes use single
+    quotes). Only a list whose items are all strings is accepted.
+    """
+    try:
+        result = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        try:
+            result = ast.literal_eval(text)
+        except (ValueError, SyntaxError):
+            return None
+
+    if isinstance(result, list) and all(isinstance(s, str) for s in result):
+        return result
+    return None
+
+
+def _extract_search_queries(plan_text: str) -> list[str]:
+    """Extract search queries from the supervisor response code fence.
+
+    Returns empty list on any failure (no fence, unparseable block, wrong
+    type). Accepts a single JSON/Python list spanning the whole block, and
+    recovers the shape where the model emitted one independent array per
+    line: every nonblank line must then be a list of strings, and the
+    ordered queries are flattened. A malformed line rejects the whole
+    block rather than salvaging a partial list.
     """
     m = _FENCE_RE.search(plan_text)
     if not m:
         return []
 
-    json_str = m.group(1).strip()
+    block = m.group(1).strip()
 
-    # Try JSON first, then Python literal eval (LLMs sometimes use single quotes)
-    try:
-        result = json.loads(json_str)
-    except (json.JSONDecodeError, ValueError):
-        try:
-            import ast
+    whole = _parse_query_list(block)
+    if whole is not None:
+        return whole
 
-            result = ast.literal_eval(json_str)
-        except (ValueError, SyntaxError):
+    queries: list[str] = []
+    saw_line = False
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        saw_line = True
+        parsed = _parse_query_list(stripped)
+        if parsed is None:
             return []
-
-    if isinstance(result, list) and all(isinstance(s, str) for s in result):
-        return result
-    return []
+        queries.extend(parsed)
+    return queries if saw_line else []
 
 
 def plan_node(state: ResearchState, config: RunnableConfig = None) -> dict[str, Any]:

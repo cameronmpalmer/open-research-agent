@@ -132,6 +132,16 @@ class TestCLI:
         result = runner.invoke(main, ["config", "--help"])
         assert result.exit_code == 0
 
+    def test_config_show_describes_supervisor_as_planning(self, monkeypatch):
+        import ora.cli as cli_module
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+
+        result = CliRunner().invoke(main, ["config", "--show"])
+
+        assert result.exit_code == 0
+        assert "Supervisor (planning): deepseek-v4-pro" in result.output.splitlines()
+
     def test_config_show_includes_intensity_table(self, monkeypatch):
         import ora.cli as cli_module
 

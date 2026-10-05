@@ -85,7 +85,7 @@ Model names may carry a `provider:model` prefix (see
 |---|---|---|
 | `models.default` | `deepseek-v4-flash` | Every role that has no explicit override |
 | `models.researcher` | (falls back to `models.default`) | Researcher agent, query generation, per-source extractor |
-| `models.supervisor` | (falls back to `models.default`) | Supervisor (planning and routing); config only, no CLI flag |
+| `models.supervisor` | (falls back to `models.default`) | Supervisor (planning); config only, no CLI flag |
 | `models.writer` | (falls back to `models.researcher`) | Writer (report synthesis) |
 | `models.reviewer` | (falls back to `models.default`) | Reviewer (intensity 3+); overridable with `--reviewer-model` |
 
