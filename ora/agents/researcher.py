@@ -744,6 +744,11 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
     # >= 2 attempts before marking open items evidence_exhausted, so items
     # are never exhausted on a single unlucky search.
     pass_executed_queries: list[str] = []
+    # Search failures are tracked separately from empty results: a failed
+    # search is not an empty search, and a run that fails every search must
+    # fail loudly rather than write a report built from an error message.
+    search_failures: list[str] = []
+    successful_searches = 0
 
     round_num = 0
 
@@ -848,10 +853,19 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             log.append(f"Search: {q}")
             emit_progress(config, f'Researcher: searching "{q}"', kind="search")
             r = web_search.invoke({"query": q})
+            if r.startswith(("Search error", "Search failed")):
+                # A failed search is not an empty result. Do not parse URLs out
+                # of the error text or fall through as if nothing matched, and
+                # record it so a run that fails every search fails loudly
+                # instead of writing a report built from an error message.
+                search_failures.append(r)
+                log.append(f"  Result: SEARCH FAILED: {r[:200]}")
+                emit_progress(
+                    config, f'Researcher: search failed for "{q}": {r[:180]}', kind="error"
+                )
+                continue
+            successful_searches += 1
             log.append(f"  Result: {len(r)} chars")
-            search_failed = r.startswith(("Search error", "Search failed"))
-            if search_failed:
-                emit_progress(config, f'Researcher: search failed for "{q}"', kind="error")
 
             raw_urls = re.findall(r'https?://[^\s<>"\')\]]+', r)
             url_titles = _extract_search_result_titles(r)
@@ -875,7 +889,7 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             emit_progress(
                 config,
                 f"Researcher: found {len(urls)} candidate {url_label}{dedup_note}",
-                kind="info" if search_failed else "success",
+                kind="success",
             )
 
             scrape_done = _scrape_and_collect(
@@ -941,8 +955,19 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             for item in review_items
         ]
 
+    if not findings and search_failures and not successful_searches:
+        # Every search failed (for example missing search credentials or a
+        # provider outage). Do not fabricate a finding from the error text:
+        # that makes the graph route to the writer and emit a blank report.
+        raise RuntimeError(
+            f"all {len(search_failures)} searches failed; first error: {search_failures[0][:300]}"
+        )
+
     if not findings:
         results_text = web_search.invoke({"query": query})
+        if results_text.startswith(("Search error", "Search failed")):
+            # Do not turn a failed content-check search into a finding claim.
+            raise RuntimeError(f"search failed while checking for content: {results_text[:300]}")
         findings.append(
             Finding(
                 claim=f"No scraped content found. Raw search: {results_text[:300]}",

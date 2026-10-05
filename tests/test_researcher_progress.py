@@ -1,5 +1,7 @@
 """Tests for researcher progress events."""
 
+import pytest
+
 from ora.agents.researcher import researcher_node
 from ora.state import Source
 
@@ -186,7 +188,15 @@ def test_researcher_uses_search_result_titles_for_sources(monkeypatch):
     assert result["sources"][0].title == "Rust vs Go: Which One to Choose?"
 
 
-def test_researcher_handles_search_failure(monkeypatch):
+def test_researcher_fails_loudly_when_every_search_fails(monkeypatch):
+    """Every search failed, so the run must raise rather than write a blank report.
+
+    Behavior changed deliberately. Previously the node emitted an error event and
+    then fabricated an Unknown-confidence finding from the error text, which made
+    the graph route to the writer and produce a report containing nothing but the
+    search error. A run whose search backend is broken (missing credentials, or a
+    provider outage) must fail loudly instead.
+    """
     events = []
 
     monkeypatch.setattr(
@@ -194,17 +204,15 @@ def test_researcher_handles_search_failure(monkeypatch):
         FakeTool("Search failed: {'error': 'timeout'}"),
     )
 
-    result = researcher_node(
-        {"query": "Rust vs Go", "intensity": 1},
-        {"configurable": {"progress_callback": events.append}},
-    )
+    with pytest.raises(RuntimeError, match="search"):
+        researcher_node(
+            {"query": "Rust vs Go", "intensity": 1},
+            {"configurable": {"progress_callback": events.append}},
+        )
 
-    messages = [event["message"] for event in events]
     kinds = [event["kind"] for event in events]
+    messages = [event["message"] for event in events]
 
-    assert result["sources"] == []
-    assert len(result["findings"]) == 1
-    assert result["findings"][0].confidence == "Unknown"
     assert "error" in kinds
     assert any("search failed" in message for message in messages)
 
