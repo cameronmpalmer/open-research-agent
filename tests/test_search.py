@@ -75,8 +75,7 @@ def _decodo_then_firecrawl(payload, status=200):
 
 def test_decodo_request_targets_google_search(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings())
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     calls = {}
 
     def fake_post(url, **kw):
@@ -93,8 +92,7 @@ def test_decodo_request_targets_google_search(monkeypatch):
 def test_decodo_live_success_returns_results_no_fallback(monkeypatch):
     """Documented success: parsed results win and the fallback never runs."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     fake_post, seen = _decodo_then_firecrawl(_live_payload(LIVE_ORGANIC, errors=[]))
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
     out = search_mod._search("q", 5)
@@ -106,8 +104,7 @@ def test_decodo_live_success_returns_results_no_fallback(monkeypatch):
 
 def test_decodo_item_prefers_desc_over_description(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     organic = [
         {"title": "T", "url": "https://x.example", "desc": "from-desc", "description": "fallback"}
     ]
@@ -122,8 +119,7 @@ def test_decodo_item_prefers_desc_over_description(monkeypatch):
 def test_decodo_single_level_nesting(monkeypatch):
     """Tolerated older shape: content.results.organic (one level shallower)."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings())
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {
         "results": [
             {
@@ -144,8 +140,7 @@ def test_decodo_single_level_nesting(monkeypatch):
 def test_decodo_organic_on_content(monkeypatch):
     """Tolerated shape: organic directly on content."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings())
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {
         "results": [
             {
@@ -164,8 +159,7 @@ def test_decodo_organic_on_content(monkeypatch):
 def test_decodo_live_empty_organic_is_empty_no_fallback(monkeypatch):
     """A usable parse with an empty organic list is a legitimate empty answer."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     fake_post, seen = _decodo_then_firecrawl(_live_payload([], errors=[]))
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
     out = search_mod._search("q", 5)
@@ -176,8 +170,7 @@ def test_decodo_live_empty_organic_is_empty_no_fallback(monkeypatch):
 def test_empty_results_list_is_empty_no_fallback(monkeypatch):
     """No task entries, no failure signal: a legitimate empty parse."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     fake_post, seen = _decodo_then_firecrawl({"results": []})
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
     out = search_mod._search("q", 5)
@@ -188,8 +181,7 @@ def test_empty_results_list_is_empty_no_fallback(monkeypatch):
 def test_decodo_613_no_results_envelope_falls_back(monkeypatch):
     """The documented no-results state is a failure, not an empty success."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {
         "status": "failed",
         "status_code": 613,
@@ -205,8 +197,7 @@ def test_decodo_613_no_results_envelope_falls_back(monkeypatch):
 
 def test_decodo_613_no_results_envelope_fallback_disabled(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=False))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     called: list[str] = []
 
     def fake_post(url, **kw):
@@ -222,8 +213,7 @@ def test_decodo_613_no_results_envelope_fallback_disabled(monkeypatch):
 def test_decodo_204_then_200_retries(monkeypatch):
     """HTTP 204 means the job is not complete; retry briefly, then succeed."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     responses = iter([FakeResp({}, status=204), FakeResp(_live_payload(LIVE_ORGANIC), status=200)])
     counts = {"post": 0, "sleep": 0}
 
@@ -244,8 +234,7 @@ def test_decodo_204_then_200_retries(monkeypatch):
 def test_decodo_204_exhausted_falls_back(monkeypatch):
     """When every call is 204, give up after the bounded retries and fall back."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     decodo_calls: list[str] = []
     sleeps: list[float] = []
 
@@ -266,8 +255,7 @@ def test_decodo_204_exhausted_falls_back(monkeypatch):
 
 def test_decodo_401_top_level_error_falls_back(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {
         "status": "failed",
         "status_code": 401,
@@ -282,8 +270,7 @@ def test_decodo_401_top_level_error_falls_back(monkeypatch):
 
 def test_decodo_400_error_message_is_surfaced(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=False))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {"status": "failed", "message": "The target is invalid"}
 
     def fake_post(url, **kw):
@@ -298,8 +285,7 @@ def test_decodo_400_error_message_is_surfaced(monkeypatch):
 def test_decodo_top_level_status_code_failure_falls_back(monkeypatch):
     """A body status_code outside {200, 202} is a failure even at HTTP 200."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {"status_code": 400, "message": "bad", "results": [{"content": _live_content([])}]}
     fake_post, seen = _decodo_then_firecrawl(payload)
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
@@ -310,8 +296,7 @@ def test_decodo_top_level_status_code_failure_falls_back(monkeypatch):
 
 def test_decodo_top_level_status_code_202_is_success(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {"status_code": 202, "results": [{"content": _live_content(LIVE_ORGANIC)}]}
     fake_post, seen = _decodo_then_firecrawl(payload)
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
@@ -324,8 +309,7 @@ def test_decodo_top_level_status_code_202_is_success(monkeypatch):
 def test_decodo_parse_status_failure_codes_fall_back(monkeypatch, code):
     """Documented parse-failure codes must fall back rather than read as empty."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = _live_payload([], parse_status=code)
     fake_post, seen = _decodo_then_firecrawl(payload)
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
@@ -338,8 +322,7 @@ def test_decodo_parse_status_failure_codes_fall_back(monkeypatch, code):
 def test_decodo_parse_status_partial_codes_are_usable(monkeypatch, code):
     """Partial-success parse codes (12004/12005) are usable, not failures."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = _live_payload(LIVE_ORGANIC, parse_status=code, errors=[])
     fake_post, seen = _decodo_then_firecrawl(payload)
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
@@ -351,8 +334,7 @@ def test_decodo_parse_status_partial_codes_are_usable(monkeypatch, code):
 def test_decodo_html_content_is_failure(monkeypatch):
     """Observed live: a missing Authorization header returns content as HTML."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {"results": [{"content": "<html><body>Sign in</body></html>"}]}
     fake_post, seen = _decodo_then_firecrawl(payload)
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
@@ -363,8 +345,7 @@ def test_decodo_html_content_is_failure(monkeypatch):
 
 def test_decodo_content_errors_non_empty_falls_back(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = _live_payload([], errors=["quota exceeded"])
     fake_post, seen = _decodo_then_firecrawl(payload)
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
@@ -376,8 +357,7 @@ def test_decodo_content_errors_non_empty_falls_back(monkeypatch):
 def test_nested_warning_errors_with_organic_keep_results(monkeypatch):
     """Warnings beside valid organic results must not discard the results."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = _live_payload(LIVE_ORGANIC, errors=["warn"])
     fake_post, seen = _decodo_then_firecrawl(payload)
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
@@ -388,8 +368,7 @@ def test_nested_warning_errors_with_organic_keep_results(monkeypatch):
 
 def test_decodo_bad_content_status_when_parse_absent_falls_back(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {
         "results": [
             {
@@ -409,8 +388,7 @@ def test_decodo_bad_content_status_when_parse_absent_falls_back(monkeypatch):
 
 def test_decodo_content_status_200_without_parse_code_is_usable(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {
         "results": [
             {
@@ -431,8 +409,7 @@ def test_decodo_content_status_200_without_parse_code_is_usable(monkeypatch):
 def test_decodo_missing_results_key_falls_back(monkeypatch):
     """A body with no results list is a failure; its message is surfaced."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     fake_post, seen = _decodo_then_firecrawl({"message": "no task envelope"})
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
     out = search_mod._search("q", 5)
@@ -442,8 +419,7 @@ def test_decodo_missing_results_key_falls_back(monkeypatch):
 
 def test_decodo_missing_credentials_falls_back(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.delenv("DECODO_USERNAME", raising=False)
-    monkeypatch.delenv("DECODO_PASSWORD", raising=False)
+    monkeypatch.delenv("DECODO_API_TOKEN", raising=False)
 
     def fake_post(url, **kw):
         assert "/v1/search" in url
@@ -454,9 +430,55 @@ def test_decodo_missing_credentials_falls_back(monkeypatch):
     assert "https://f.example" in out
 
 
-def test_malformed_payload_returns_error_not_raise(monkeypatch):
+def test_decodo_token_is_sent_as_basic_auth(monkeypatch):
+    """DECODO_API_TOKEN is used verbatim as the Basic credential."""
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=False))
+    monkeypatch.setenv("DECODO_API_TOKEN", "abc123token")
+    captured = {}
+
+    def fake_post(url, **kw):
+        captured["headers"] = kw["headers"]
+        captured["auth"] = kw.get("auth")
+        return FakeResp(_live_payload(LIVE_ORGANIC))
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    out = search_mod._search("q", 5)
+
+    assert captured["headers"]["Authorization"] == "Basic abc123token"
+    assert captured["auth"] is None, "Basic auth must come from the token header, not requests auth"
+    assert "https://live.example/1" in out, out  # the request really succeeded
+
+
+def test_username_password_env_vars_are_not_accepted(monkeypatch):
+    """Username/password must not authenticate: DECODO_API_TOKEN is the only credential."""
+    monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=False))
+    monkeypatch.delenv("DECODO_API_TOKEN", raising=False)
     monkeypatch.setenv("DECODO_USERNAME", "u")
     monkeypatch.setenv("DECODO_PASSWORD", "p")
+    called = []
+
+    def fake_post(url, **kw):
+        called.append(url)
+        return FakeResp(_live_payload(LIVE_ORGANIC))
+
+    monkeypatch.setattr(search_mod.requests, "post", fake_post)
+    out = search_mod._search("q", 5)
+
+    assert out.startswith("Search error:"), out
+    assert "DECODO_API_TOKEN" in out
+    assert not called, f"username/password must not reach the API: {called}"
+
+
+def test_decodo_missing_token_reports_the_env_var(monkeypatch):
+    monkeypatch.setenv("DECODO_API_TOKEN", "")  # present but empty
+    results, err = search_mod._decodo_search("q", _settings(fallback=False).search, 5)
+
+    assert results == []
+    assert err and "DECODO_API_TOKEN" in err
+
+
+def test_malformed_payload_returns_error_not_raise(monkeypatch):
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
 
     # Decodo path.
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=False))
@@ -481,8 +503,7 @@ def test_malformed_payload_returns_error_not_raise(monkeypatch):
 
 def test_limit_is_respected(monkeypatch):
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings())
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     organic = [
         {"title": "A", "url": "https://a.example", "desc": "a"},
         {"title": "B", "url": "https://b.example", "desc": "b"},
@@ -499,8 +520,7 @@ def test_limit_is_respected(monkeypatch):
 def test_top_level_errors_with_valid_results_keeps_results(monkeypatch):
     """A top-level error list beside usable results must not discard them."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {"errors": ["warn"], "results": [{"content": _live_content(LIVE_ORGANIC)}]}
     fake_post, seen = _decodo_then_firecrawl(payload)
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
@@ -512,8 +532,7 @@ def test_top_level_errors_with_valid_results_keeps_results(monkeypatch):
 def test_top_level_message_with_empty_content_entry_falls_back(monkeypatch):
     """A provider error must not be masked by an empty-content task entry."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {"message": "rate limited", "results": [{"content": {}}]}
     fake_post, seen = _decodo_then_firecrawl(payload)
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
@@ -532,8 +551,7 @@ def test_top_level_message_with_empty_content_entry_falls_back(monkeypatch):
 def test_malformed_entries_are_failure_not_empty(monkeypatch, payload):
     """A non-empty results list with no usable entry must fall back."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     fake_post, seen = _decodo_then_firecrawl(payload)
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
     out = search_mod._search("q", 5)
@@ -544,8 +562,7 @@ def test_malformed_entries_are_failure_not_empty(monkeypatch, payload):
 def test_content_empty_errors_key_is_empty_success(monkeypatch):
     """A present empty ``errors`` list is the documented success marker."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     fake_post, seen = _decodo_then_firecrawl({"results": [{"content": {"errors": []}}]})
     monkeypatch.setattr(search_mod.requests, "post", fake_post)
     out = search_mod._search("q", 5)
@@ -558,8 +575,7 @@ def test_decodo_failure_with_default_fallback_off_does_not_call_firecrawl(monkey
     s = ORASettings()
     s.search = SearchSettings(provider="decodo")  # fallback_to_firecrawl defaults False
     monkeypatch.setattr(search_mod, "load_config", lambda: s)
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     called: list[str] = []
 
     def fake_post(url, **kw):
@@ -636,8 +652,7 @@ def test_unknown_provider_warns_and_uses_firecrawl(monkeypatch):
 def test_decodo_populated_shallower_organic_beats_empty_deep(monkeypatch):
     """An empty deepest organic list must not shadow a populated shallower one."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     content = {
         "results": {
             "parse_status_code": 12000,
@@ -656,8 +671,7 @@ def test_decodo_populated_shallower_organic_beats_empty_deep(monkeypatch):
 def test_results_win_over_job_level_failure_signal(monkeypatch):
     """Pins results-win precedence: usable content beats a job-level failure."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
-    monkeypatch.setenv("DECODO_USERNAME", "u")
-    monkeypatch.setenv("DECODO_PASSWORD", "p")
+    monkeypatch.setenv("DECODO_API_TOKEN", "test-token")
     payload = {
         "status": "failed",
         "status_code": 613,

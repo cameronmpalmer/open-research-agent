@@ -23,8 +23,11 @@ class SearchSettings(BaseModel):
     # Decodo SERP API (https://scraper-api.decodo.com/v2/scrape). Credentials are
     # read from process env only, never from config.yaml.
     decodo_api_url: str = "https://scraper-api.decodo.com/v2/scrape"
-    decodo_username_env: str = "DECODO_USERNAME"
-    decodo_password_env: str = "DECODO_PASSWORD"
+    # Single Basic-auth credential issued by the Decodo dashboard (API
+    # Playground). Username/password are deliberately not supported: the token
+    # is the credential Decodo issues, and the account password is a broader
+    # secret than the API requires.
+    decodo_token_env: str = "DECODO_API_TOKEN"
     decodo_domain: str = "com"
     decodo_locale: str = "en-us"
     # Off by default: Firecrawl search is unreliable and in practice often
