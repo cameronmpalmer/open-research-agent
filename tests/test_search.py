@@ -520,7 +520,9 @@ class TestValidateSearchCredentials:
         monkeypatch.setenv("DECODO_API_KEY", "")
         called = []
         monkeypatch.setattr(
-            search_mod.requests, "post", lambda *a, **kw: called.append(1) or FakeResp({}, status=400)
+            search_mod.requests,
+            "post",
+            lambda *a, **kw: called.append(1) or FakeResp({}, status=400),
         )
 
         err = search_mod.validate_search_credentials(_settings().search)
@@ -531,10 +533,14 @@ class TestValidateSearchCredentials:
     def test_non_decodo_provider_is_skipped(self, monkeypatch):
         called = []
         monkeypatch.setattr(
-            search_mod.requests, "post", lambda *a, **kw: called.append(1) or FakeResp({}, status=400)
+            search_mod.requests,
+            "post",
+            lambda *a, **kw: called.append(1) or FakeResp({}, status=400),
         )
 
-        assert search_mod.validate_search_credentials(_settings(provider="firecrawl").search) is None
+        assert (
+            search_mod.validate_search_credentials(_settings(provider="firecrawl").search) is None
+        )
         assert not called, "firecrawl needs no credential probe"
 
 

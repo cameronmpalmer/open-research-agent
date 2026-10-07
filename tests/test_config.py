@@ -489,18 +489,14 @@ class TestWriterModelResolution:
         """Backward compatibility: unset models.writer uses models.researcher."""
         from ora.config import ModelSettings
 
-        settings = ORASettings(
-            models=ModelSettings(default="m-default", researcher="m-researcher")
-        )
+        settings = ORASettings(models=ModelSettings(default="m-default", researcher="m-researcher"))
         assert get_writer_model(settings) == "m-researcher"
 
     def test_writer_config_wins_over_researcher(self):
         from ora.config import ModelSettings
 
         settings = ORASettings(
-            models=ModelSettings(
-                default="m-default", researcher="m-researcher", writer="m-writer"
-            )
+            models=ModelSettings(default="m-default", researcher="m-researcher", writer="m-writer")
         )
         assert get_writer_model(settings) == "m-writer"
 

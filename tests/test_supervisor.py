@@ -135,7 +135,7 @@ More text."""
             '["valid query"]\n[["nested"]]',
             '["valid query"]\n["unclosed',
             '["valid query"]\n...',
-            "this is prose\n[\"valid query\"]",
+            'this is prose\n["valid query"]',
         ],
     )
     def test_multiline_recovery_rejects_whole_block_on_any_invalid_row(self, payload):
@@ -246,12 +246,7 @@ def test_revise_plan_text_uses_multiline_extractor(monkeypatch):
     """revise_plan_text shares the same extractor, including the recovery path."""
     from ora.agents.supervisor import revise_plan_text
 
-    response = (
-        "# Revised Plan\n\n"
-        "```search_queries\n"
-        f"{_seven_line_payload()}\n"
-        "```"
-    )
+    response = f"# Revised Plan\n\n```search_queries\n{_seven_line_payload()}\n```"
 
     monkeypatch.setattr(
         "ora.agents.supervisor._invoke_supervisor",
