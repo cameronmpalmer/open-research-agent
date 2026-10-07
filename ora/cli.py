@@ -156,7 +156,11 @@ def _run_collected(collector: UsageCollector, func, *args, **kwargs):
     "--max-revisions",
     type=click.IntRange(min=1),
     default=None,
-    help="Max writer-reviewer revision cycles (default: config limits.max_revisions)",
+    help=(
+        "Maximum reviewer audits including the initial draft audit "
+        "(1 = single audit, no revisions; config default 3 permits up to two "
+        "revision passes; default: config limits.max_revisions)"
+    ),
 )
 @click.option("--no-review", is_flag=True, help="Skip adversarial review")
 @click.option(
@@ -492,7 +496,7 @@ def config(show, init):
             f"  {name}: {resolved.base_url} (key env: {key_env or 'n/a'}, key set: {key_set})"
         )
     click.echo()
-    click.echo(f"Max revisions: {settings.limits.max_revisions}")
+    click.echo(f"Max reviewer audits: {settings.limits.max_revisions}")
     click.echo()
 
     from ora.agents.researcher import LEVEL_PARAMS

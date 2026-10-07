@@ -99,8 +99,9 @@ class ResearchState(TypedDict, total=False):
     draft_report: str
     revision_count: int
 
-    # Review budget: optional run-scoped cap on writer-reviewer revision
-    # cycles, wired from the CLI --max-revisions flag / config
+    # Review budget: optional run-scoped cap on total reviewer audits
+    # (the initial draft audit included, so 1 = a single audit with no
+    # revision passes), wired from the CLI --max-revisions flag / config
     # limits.max_revisions by ora.cli.research. Absent -> MAX_REVISIONS (3).
     max_revisions: int
 

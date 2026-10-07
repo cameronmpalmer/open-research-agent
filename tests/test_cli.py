@@ -101,6 +101,22 @@ class TestCLI:
         assert "intensity" in result.output
         assert "quiet" in result.output
 
+    def test_research_help_describes_max_revisions_as_total_audits(self):
+        """--max-revisions budgets total reviewer audits (the initial draft
+        audit included), not post-draft revision cycles. 1 therefore means a
+        single audit with no revision passes."""
+        result = CliRunner().invoke(main, ["research", "--help"])
+
+        assert result.exit_code == 0
+        # Collapse Click's line wrapping before matching multi-word phrases.
+        normalized = " ".join(result.output.split())
+        assert "reviewer audits" in normalized
+        assert "initial draft audit" in normalized
+        assert "single audit" in normalized
+        assert "no revision" in normalized
+        # The old, ambiguous "revision cycles" contract wording must be gone.
+        assert "revision cycles" not in normalized
+
     def test_plan_help(self):
         runner = CliRunner()
         result = runner.invoke(main, ["plan", "--help"])
@@ -156,6 +172,20 @@ class TestCLI:
         assert "Quick" in result.output
         assert "Deep" in result.output
         assert "Exhaustive" in result.output
+
+    def test_config_show_labels_max_revisions_as_reviewer_audits(self, monkeypatch):
+        """config --show must label the value as a total reviewer-audit budget
+        so "3" reads the same way as the flag and docs, not as revision
+        cycles. The value itself (settings.limits.max_revisions) is unchanged."""
+        import ora.cli as cli_module
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+
+        result = CliRunner().invoke(main, ["config", "--show"])
+
+        assert result.exit_code == 0
+        assert "Max reviewer audits: 3" in result.output.splitlines()
+        assert "Max revisions: 3" not in result.output.splitlines()
 
     def test_config_init_creates_file(self, tmp_path):
         """config --init must create ~/.ora/config.yaml on a fresh HOME."""

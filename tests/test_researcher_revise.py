@@ -4,17 +4,22 @@ Covers generate_gap_queries_for_items (dedup, shared parser preservation,
 no-open-items/LLM-failure fallbacks) and researcher_node revise-pass
 behavior: min-met revise rounds search up to three fresh queries; whole-pass
 zero-new-sources marks open items evidence_exhausted only after a genuine
-multi-query attempt (>= 2 queries searched); single-query rounds keep items
-open; progress keeps them open; failed searches still count as attempts.
+multi-query attempt (>= 2 SUCCESSFUL searches); single-query rounds keep items
+open; progress keeps them open; a pass where every search fails raises instead
+of exhausting items (failed searches are infrastructure errors, not evidence).
 """
 
 import types
 
+import pytest
+
+import ora.tools.search as search_mod
 from ora.agents.researcher import (
     generate_gap_queries,
     generate_gap_queries_for_items,
     researcher_node,
 )
+from ora.config import ORASettings, SearchSettings
 from ora.state import Finding, ResearchState, ReviewVerdict, Source, SourceExtraction
 
 OPEN_ITEMS = [
@@ -312,10 +317,15 @@ class TestResearcherNodeExhaustion:
         assert result["review_items"]
         assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
 
-    def test_revise_search_failures_count_as_attempts(self, monkeypatch):
-        """A failed search is still a genuine attempt: two failed ITEM
-        searches on a min-met revise round with open items reach the >= 2
-        floor and exhaust the items (zero new sources)."""
+    def test_revise_all_searches_failed_raises_without_exhausting(self, monkeypatch):
+        """A revise pass whose searches ALL fail is an infrastructure error,
+        not evidence exhaustion. Even with prior findings on the state, the
+        node must raise instead of flipping open items to evidence_exhausted
+        and letting the graph write a report built from a search outage.
+
+        Contract correction: the previous behavior counted failed searches as
+        attempts toward the >= 2 exhaustion floor, so two failed searches
+        exhausted the items. Failed searches are now errors, never evidence."""
         state = _revise_state(
             search_queries=["leftover plan query one", "leftover plan query two"],
             executed_queries=[],
@@ -329,12 +339,57 @@ class TestResearcherNodeExhaustion:
             "ora.tools.search.web_search",
             _FakeTool("Search error: rate limited"),
         )
+        events = []
+
+        with pytest.raises(RuntimeError, match="all 2 searches failed"):
+            researcher_node(
+                state,
+                {"configurable": {"progress_callback": events.append}},
+            )
+
+        # No exhaustion, and the caller's state is unchanged.
+        assert state["review_items"]
+        assert all(item["status"] == "open" for item in state["review_items"])
+        assert len(state["sources"]) == 15
+        assert len(state["findings"]) == 1
+
+        kinds = [event["kind"] for event in events]
+        messages = [event["message"] for event in events]
+        assert "error" in kinds
+        assert sum(1 for message in messages if "search failed" in message) == 2
+        # The pass never completes, so there is no success ("finished") event.
+        assert "success" not in kinds
+
+    def test_revise_mixed_success_and_failure_keeps_items_open(self, monkeypatch):
+        """A revise pass with one successful (empty) search and one failed
+        search continues normally: the single success is below the >= 2
+        SUCCESSFUL-search exhaustion floor, so items stay open."""
+        state = _revise_state(
+            search_queries=["leftover plan query one", "leftover plan query two"],
+            executed_queries=[],
+        )
+        monkeypatch.setattr(
+            "ora.agents.researcher.get_llm",
+            lambda *a, **kw: _FakeLLM("item query one\nitem query two\n"),
+        )
+        calls = {"n": 0}
+
+        def fake_search(_args):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return "Search error: rate limited"
+            return "No results matched your search."
+
+        monkeypatch.setattr(
+            "ora.tools.search.web_search", types.SimpleNamespace(invoke=fake_search)
+        )
 
         result = researcher_node(state)
 
+        assert calls["n"] == 2
         assert result["last_round_new_sources"] == 0
         assert result["review_items"]
-        assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
+        assert all(item["status"] == "open" for item in result["review_items"])
 
     def test_revise_duplicate_regeneration_breaks_without_templates(self, monkeypatch):
         """When even per-item regeneration only repeats executed queries, the
@@ -406,3 +461,112 @@ class TestResearcherNodeProgress:
         assert result["last_round_new_findings"] == 1
         assert result["review_items"]
         assert all(item["status"] == "open" for item in result["review_items"])
+
+
+class _FakeResp:
+    """Minimal requests.Response double: only .json() and .status_code are read."""
+
+    def __init__(self, payload, status=200):
+        self._payload = payload
+        self.status_code = status
+
+    def json(self):
+        return self._payload
+
+
+# Documented Decodo HTTP 200 body envelope for a query that parsed successfully
+# but produced no organic results: a genuine empty search.
+_USABLE_EMPTY_PAYLOAD = {
+    "results": [
+        {
+            "content": {
+                "results": {"results": {"organic": []}, "parse_status_code": 12000},
+                "errors": [],
+            }
+        }
+    ]
+}
+
+# Documented 613 "Faulted After Too Many Retries" provider fault envelope. It is
+# sometimes observed on queries that match nothing, but it is a provider fault,
+# not a no-results signal.
+_FAULT_613_PAYLOAD = {
+    "status": "failed",
+    "status_code": 613,
+    "message": "We were not able to scrape the target",
+    "task_id": "t",
+}
+
+
+class TestResearcherSearchProviderIntegration:
+    """Provider-to-researcher regression through the real search tool.
+
+    A real Decodo HTTP 200 envelope flows through the unpatched
+    ``ora.tools.search.web_search``/``_search``/``_decodo_search`` (only
+    ``requests.post`` and ``load_config`` are faked) into a revise pass. A 613
+    fault-after-retries envelope must fail the pass loudly even with a retained
+    draft/findings, while two usable 12000 zero-organic parses are genuine empty
+    searches and may exhaust the open items. The fallback is off, so no request
+    may ever reach Firecrawl.
+    """
+
+    def _run(self, monkeypatch, payload):
+        monkeypatch.setenv("DECODO_API_KEY", "test-token")
+        settings = ORASettings()
+        settings.search = SearchSettings(provider="decodo", fallback_to_firecrawl=False)
+        # Own both the search dispatch config and the researcher's own
+        # load_config so ambient config cannot change provider/model resolution.
+        monkeypatch.setattr(search_mod, "load_config", lambda: settings)
+        monkeypatch.setattr("ora.agents.researcher.load_config", lambda: settings)
+        requested: list[str] = []
+
+        def fake_post(url, **kw):
+            requested.append(url)
+            return _FakeResp(payload)
+
+        monkeypatch.setattr(search_mod.requests, "post", fake_post)
+        monkeypatch.setattr(
+            "ora.agents.researcher.get_llm",
+            lambda *a, **kw: _FakeLLM("item query one\nitem query two\n"),
+        )
+        state = _revise_state(
+            search_queries=["leftover plan query one", "leftover plan query two"],
+            executed_queries=[],
+        )
+        events: list = []
+        return state, requested, events
+
+    @pytest.mark.parametrize(
+        ("payload", "outcome"),
+        [
+            pytest.param(_FAULT_613_PAYLOAD, "error", id="613-provider-fault"),
+            pytest.param(_USABLE_EMPTY_PAYLOAD, "exhausted", id="12000-zero-organic-empty"),
+        ],
+    )
+    def test_revise_pass_decodo_envelope(self, monkeypatch, payload, outcome):
+        state, requested, events = self._run(monkeypatch, payload)
+        config = {"configurable": {"progress_callback": events.append}}
+
+        if outcome == "error":
+            with pytest.raises(RuntimeError, match="all 2 searches failed"):
+                researcher_node(state, config)
+            # The fault never exhausts items or mutates the retained state.
+            assert state["review_items"]
+            assert all(item["status"] == "open" for item in state["review_items"])
+            assert len(state["sources"]) == 15
+            assert len(state["findings"]) == 1
+            kinds = [event["kind"] for event in events]
+            assert "error" in kinds
+            assert "success" not in kinds
+        else:
+            result = researcher_node(state, config)
+            assert result["last_round_new_sources"] == 0
+            assert result["review_items"]
+            assert all(item["status"] == "evidence_exhausted" for item in result["review_items"])
+            # The caller's checkpointed state is untouched.
+            assert all(item["status"] == "open" for item in state["review_items"])
+
+        # Both actual searches hit the Decodo endpoint only; never Firecrawl.
+        assert len(requested) == 2, requested
+        assert all(url.endswith("/v2/scrape") for url in requested), requested
+        assert all("/v1/search" not in url for url in requested), requested

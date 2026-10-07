@@ -9,9 +9,11 @@ https://help.decodo.com/docs/web-scraping-api-status-codes, verified live
   ``>= 400`` failure (``500``/``524`` are not billed, but any failure still
   falls back when the fallback is enabled).
 * Body: top-level ``status == "failed"`` is a failure (for example the HTTP 200
-  ``status_code: 613`` envelope a no-results query returns; 613 is a body
-  status code, not an HTTP status). A top-level ``status_code`` outside
-  ``{200, 202}`` is also a failure.
+  ``status_code: 613`` envelope; 613 is a body status code, not an HTTP status,
+  and the documented "Faulted After Too Many Retries" provider fault). 613 is
+  sometimes observed on queries that match nothing, but it means the provider
+  gave up after retries and is never proof the result page was empty. A
+  top-level ``status_code`` outside ``{200, 202}`` is also a failure.
 * Per task: ``parse_status_code`` in ``{12000, 12004, 12005}`` is a usable
   parse. When it is absent, ``content.status_code`` in ``{200, 12000}`` is the
   fallback signal. A non-empty ``content.errors`` is a failure.
@@ -203,9 +205,10 @@ def _decodo_search(
     if not isinstance(data, dict):
         return [], f"decodo malformed response: {type(data).__name__}"
     if "results" not in data:
-        # No task envelope: the documented no-results (613) and other error
-        # bodies put status/message here, so surface them rather than reading
-        # the body as an empty answer.
+        # No task envelope: the documented 613 fault-after-retries envelope and
+        # other error bodies put status/message here, so surface them rather
+        # than reading the body as an empty answer. 613 is a provider fault,
+        # not a no-results signal.
         if data.get("status") == "failed":
             return [], f"decodo status {data.get('status_code')}: {data.get('message')}"
         if _non_empty_error(data.get("message")):

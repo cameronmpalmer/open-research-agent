@@ -166,7 +166,7 @@ Levels 3, 4, and 5 use the adversarial reviewer by default.
 | `-r`, `--reviewer-model NAME` | Override the LLM model for planning and review |
 | `-y`, `--auto-approve` | Skip the interactive plan approval prompt |
 | `--no-review` | Disable adversarial reviewer (even at intensity 3+) |
-| `--max-revisions N` | Cap reviewer revision rounds (defaults to `limits.max_revisions` in config, itself 3) |
+| `--max-revisions N` | Maximum reviewer audits including the initial draft audit (`1` = single audit, no revision; defaults to `limits.max_revisions` in config, itself 3 = up to two revision passes) |
 | `--quiet` | Suppress progress output, show only the final report |
 
 ## Output files

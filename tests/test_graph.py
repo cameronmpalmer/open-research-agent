@@ -496,6 +496,41 @@ class TestReviewLoopIntegration:
         assert "## Changes made" in final["draft_report"]
         assert item_text in final["draft_report"]
 
+    def test_budget_one_is_a_single_audit_with_no_revision_passes(self):
+        """max_revisions=1 is the total audit budget, so the first reviewer
+        audit ends the loop even on REVISE: the writer runs once (the initial
+        draft) and the researcher runs once (the initial research), with no
+        revision pass."""
+        calls = {"researcher": 0, "writer": 0, "reviewer": 0}
+        item_text = "Add pricing details"
+
+        def researcher(state):
+            calls["researcher"] += 1
+            return {"findings": [Finding(claim="initial claim")]}
+
+        def writer(state):
+            calls["writer"] += 1
+            return {"draft_report": self.FIRST_DRAFT}
+
+        reviewer = self._reviewer_fake(
+            calls,
+            [
+                (
+                    ReviewVerdict(verdict="REVISE", blocking=[item_text]),
+                    [{"category": "blocking", "text": item_text, "status": "open"}],
+                ),
+            ],
+        )
+
+        graph = self._build_loop(researcher, writer, reviewer)
+        final = graph.invoke(
+            {"query": "test query", "intensity": 3, "revision_count": 0, "max_revisions": 1}
+        )
+
+        assert calls == {"researcher": 1, "writer": 1, "reviewer": 1}
+        assert final["revision_count"] == 1
+        assert final["review_verdict"].verdict == "REVISE"
+
     def test_final_audit_new_issue_retained_in_end_state(self):
         """A NEW issue raised on the final (budget-capped) audit cannot get a
         researcher pass, but it must survive in the end state (REVISE verdict

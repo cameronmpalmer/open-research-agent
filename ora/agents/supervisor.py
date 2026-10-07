@@ -24,9 +24,11 @@ def _invoke_supervisor(prompt: str) -> str:
 
 _FENCE_RE = re.compile(r"```\s*search_queries\s*\n(.*?)```", re.DOTALL)
 
-# Hard cap on writer-reviewer revision cycles. Shared by the routing budget
-# (route_after_reviewer) and the reviewer's audit context (audit_number /
-# max_audits) so the reviewer knows when it is at its final audit.
+# Hard cap on total reviewer audits, the initial draft audit included: 1 is a
+# single audit with no revision passes, and N permits at most N-1 revision
+# passes. Shared by the routing budget (route_after_reviewer) and the
+# reviewer's audit context (audit_number / max_audits) so the reviewer knows
+# when it is at its final audit.
 MAX_REVISIONS = 3
 
 

@@ -5,7 +5,8 @@ HTTP 200 success, 204 job-not-complete, ``>= 400`` failure; body
 ``status == "failed"`` or a top-level ``status_code`` outside ``{200, 202}``;
 per-task ``parse_status_code`` usable in ``{12000, 12004, 12005}`` with a
 ``content.status_code`` fallback in ``{200, 12000}``; organic results at
-``content.results.results.organic`` with ``desc`` snippets.
+``content.results.results.organic`` with ``desc`` snippets. Body 613 is the
+"Faulted After Too Many Retries" provider fault, not a no-results marker.
 """
 
 import json
@@ -178,8 +179,11 @@ def test_empty_results_list_is_empty_no_fallback(monkeypatch):
     assert all("/v1/search" not in u for u in seen), f"fallback fired: {seen}"
 
 
-def test_decodo_613_no_results_envelope_falls_back(monkeypatch):
-    """The documented no-results state is a failure, not an empty success."""
+def test_decodo_613_fault_after_retries_falls_back(monkeypatch):
+    """613 is the documented "Faulted After Too Many Retries" provider fault,
+    not a no-results state: it is a failure that falls back when enabled. It is
+    sometimes observed on queries that match nothing, but that observation does
+    not make 613 proof of an empty result page."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=True))
     monkeypatch.setenv("DECODO_API_KEY", "test-token")
     payload = {
@@ -195,7 +199,9 @@ def test_decodo_613_no_results_envelope_falls_back(monkeypatch):
     assert any("/v1/search" in u for u in seen)
 
 
-def test_decodo_613_no_results_envelope_fallback_disabled(monkeypatch):
+def test_decodo_613_fault_after_retries_fallback_disabled(monkeypatch):
+    """With the fallback off, the 613 provider fault after retries surfaces as
+    an error rather than being read as an empty search."""
     monkeypatch.setattr(search_mod, "load_config", lambda: _settings(fallback=False))
     monkeypatch.setenv("DECODO_API_KEY", "test-token")
     called: list[str] = []

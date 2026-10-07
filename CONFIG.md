@@ -47,9 +47,9 @@ output:                              # parsed but not yet consumed by the CLI
   default_format: markdown
   always_include_sources: true
 
-limits:                              # written by config --init and shown by
-  max_revisions: 3                   # config --show; the revision budget when
-  default_intensity: 2               # --max-revisions is not passed
+limits:
+  max_revisions: 3                   # total reviewer audits; --max-revisions overrides
+  default_intensity: 2               # parsed and shown; CLI intensity default stays 2
 
 provider:
   default: deepseek                  # used when a model name has no prefix
@@ -131,6 +131,17 @@ a successful search that simply found nothing is reported as
 `No search results found.` and does **not** retry, so a quiet query is not
 double-billed. Scrape always uses Firecrawl regardless of `search.provider`.
 
+A search failure (a provider fault such as Decodo's `613` "Faulted After Too
+Many Retries", an HTTP error, a provider-reported error, or a malformed body) is
+an error, never an empty result; if the fallback is enabled it may still be
+rescued by Firecrawl, but when the fallback is off or also fails the error
+reaches the researcher. A research or revision pass in which **every** actual
+search fails aborts the run with an error, even when an earlier draft or prior
+findings already exist: a provider outage is never recorded as an accepted
+evidence gap. Only genuinely successful empty searches count toward the
+two-search floor that can mark an open review item `evidence_exhausted`; failed
+searches never count.
+
 ### output
 
 Parsed and shown by `config --init`/`--show`, but **not yet consumed by the
@@ -143,10 +154,12 @@ CLI**. Reserved for future report-format controls.
 
 ### limits
 
-`limits.max_revisions` is now wired: it is the revision budget used whenever
-`--max-revisions` is not passed explicitly (an explicit flag wins).
-`limits.default_intensity` is parsed and shown by `config --show` but the CLI
-still uses its own `--intensity` default of 2.
+`limits.max_revisions` is now wired: it is the maximum number of reviewer
+audits, including the initial draft audit, used whenever `--max-revisions` is
+not passed explicitly (an explicit flag wins). A value of `1` means a single
+audit with no revision passes; the default `3` permits up to two revision
+passes. `limits.default_intensity` is parsed and shown by `config --show` but
+the CLI still uses its own `--intensity` default of 2.
 
 | Key | Default |
 |---|---|

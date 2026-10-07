@@ -739,15 +739,13 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
     start_sources = len(sources)
     start_findings = len(findings)
 
-    # Queries actually searched this pass (not merely generated); a failed
-    # search still counts as an attempt. The exhaustion rule below requires
-    # >= 2 attempts before marking open items evidence_exhausted, so items
-    # are never exhausted on a single unlucky search.
-    pass_executed_queries: list[str] = []
     # Search failures are tracked separately from empty results: a failed
     # search is not an empty search, and a run that fails every search must
     # fail loudly rather than write a report built from an error message.
     search_failures: list[str] = []
+    # Only genuinely successful searches count toward the >= 2 floor the
+    # exhaustion rule below requires. A failed search is an infrastructure
+    # error, never evidence that the open items were investigated.
     successful_searches = 0
 
     round_num = 0
@@ -846,10 +844,6 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
                 break
 
             executed_q_set.add(q)
-            # Count only queries that are actually searched this pass. A
-            # failed search still counts: it is a genuine (if unproductive)
-            # attempt toward the open items.
-            pass_executed_queries.append(q)
             log.append(f"Search: {q}")
             emit_progress(config, f'Researcher: searching "{q}"', kind="search")
             r = web_search.invoke({"query": q})
@@ -920,14 +914,29 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
         if revise_round:
             revise_round = False
 
+    # Search-outage guard: a pass that attempted at least one search and had
+    # every single one fail is an infrastructure error, not evidence
+    # exhaustion. Raise BEFORE the exhaustion rule so a backend outage can
+    # never be recorded as an accepted evidence gap, even when a prior pass
+    # produced findings. A pass that issued no searches (for example a revise
+    # round with no fresh queries) is unaffected: search_failures stays empty.
+    if search_failures and not successful_searches:
+        # Do not fabricate a finding from the error text: that makes the graph
+        # route to the writer and emit a blank report built from an error.
+        raise RuntimeError(
+            f"all {len(search_failures)} searches failed; first error: {search_failures[0][:300]}"
+        )
+
     # Exhaustion rule: mark open items evidence_exhausted only when this was
     # a review-driven revise pass, open items exist, the WHOLE pass produced
-    # zero new sources, AND at least two queries were actually searched. On an
-    # item-targeted revise round where min_sources is already met the query
-    # loop now runs up to three searches (item_targeted_revise above), so two
-    # zero-yield searches are a genuine multi-query attempt; one search (or
-    # zero after regeneration) leaves items open so attempts can accumulate
-    # across
+    # zero new sources, AND at least two searches SUCCEEDED. Failed searches
+    # never count toward this floor: a failed search is an error, not an empty
+    # result, so it is not evidence that the open items were investigated
+    # (those passes raise above). On an item-targeted revise round where
+    # min_sources is already met the query loop runs up to three searches
+    # (item_targeted_revise above), so two zero-yield successful searches are
+    # a genuine multi-query attempt; one successful search (or zero after
+    # regeneration) leaves items open so attempts can accumulate across
     # REVISE passes. NOTE for the amended Task 4 routing contract: REVISE
     # routes back to the researcher iff revision_count < 3 AND at least one
     # open (non-exhausted) review item remains, otherwise the graph ends;
@@ -945,7 +954,7 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
         revise_pass
         and open_items
         and (len(sources) - start_sources) == 0
-        and len(pass_executed_queries) >= 2
+        and successful_searches >= 2
     ):
         # Build fresh dicts instead of mutating the caller's state in place:
         # review_items may be shared with the checkpointed graph state, and
@@ -954,14 +963,6 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             {**item, "status": "evidence_exhausted"} if item.get("status") == "open" else {**item}
             for item in review_items
         ]
-
-    if not findings and search_failures and not successful_searches:
-        # Every search failed (for example missing search credentials or a
-        # provider outage). Do not fabricate a finding from the error text:
-        # that makes the graph route to the writer and emit a blank report.
-        raise RuntimeError(
-            f"all {len(search_failures)} searches failed; first error: {search_failures[0][:300]}"
-        )
 
     if not findings:
         results_text = web_search.invoke({"query": query})

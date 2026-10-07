@@ -9,9 +9,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class LimitSettings(BaseModel):
-    # At least one writer-reviewer revision cycle: 0 (or a negative value)
-    # would disable revisions entirely and is rejected loudly at load rather
-    # than silently coerced at the cap sites.
+    # Maximum total reviewer audits, including the initial draft audit: 1 is
+    # a single audit with no revision passes, and N permits at most N-1
+    # revision passes. 0 (or a negative value) would disable review entirely
+    # and is rejected loudly at load rather than silently coerced at the cap
+    # sites.
     max_revisions: int = Field(default=3, ge=1)
     default_intensity: int = 2
 
