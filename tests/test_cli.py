@@ -17,6 +17,7 @@ def _fake_settings():
             default="deepseek-v4-flash",
             researcher="deepseek-v4-flash",
             supervisor="deepseek-v4-pro",
+            writer=None,
             reviewer="deepseek-v4-pro",
         ),
         search=SimpleNamespace(provider="firecrawl", firecrawl_api_url="https://api.firecrawl.com"),
@@ -100,6 +101,22 @@ class TestCLI:
         assert "intensity" in result.output
         assert "quiet" in result.output
 
+    def test_research_help_describes_max_revisions_as_total_audits(self):
+        """--max-revisions budgets total reviewer audits (the initial draft
+        audit included), not post-draft revision cycles. 1 therefore means a
+        single audit with no revision passes."""
+        result = CliRunner().invoke(main, ["research", "--help"])
+
+        assert result.exit_code == 0
+        # Collapse Click's line wrapping before matching multi-word phrases.
+        normalized = " ".join(result.output.split())
+        assert "reviewer audits" in normalized
+        assert "initial draft audit" in normalized
+        assert "single audit" in normalized
+        assert "no revision" in normalized
+        # The old, ambiguous "revision cycles" contract wording must be gone.
+        assert "revision cycles" not in normalized
+
     def test_plan_help(self):
         runner = CliRunner()
         result = runner.invoke(main, ["plan", "--help"])
@@ -131,6 +148,16 @@ class TestCLI:
         result = runner.invoke(main, ["config", "--help"])
         assert result.exit_code == 0
 
+    def test_config_show_describes_supervisor_as_planning(self, monkeypatch):
+        import ora.cli as cli_module
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+
+        result = CliRunner().invoke(main, ["config", "--show"])
+
+        assert result.exit_code == 0
+        assert "Supervisor (planning): deepseek-v4-pro" in result.output.splitlines()
+
     def test_config_show_includes_intensity_table(self, monkeypatch):
         import ora.cli as cli_module
 
@@ -145,6 +172,20 @@ class TestCLI:
         assert "Quick" in result.output
         assert "Deep" in result.output
         assert "Exhaustive" in result.output
+
+    def test_config_show_labels_max_revisions_as_reviewer_audits(self, monkeypatch):
+        """config --show must label the value as a total reviewer-audit budget
+        so "3" reads the same way as the flag and docs, not as revision
+        cycles. The value itself (settings.limits.max_revisions) is unchanged."""
+        import ora.cli as cli_module
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+
+        result = CliRunner().invoke(main, ["config", "--show"])
+
+        assert result.exit_code == 0
+        assert "Max reviewer audits: 3" in result.output.splitlines()
+        assert "Max revisions: 3" not in result.output.splitlines()
 
     def test_config_init_creates_file(self, tmp_path):
         """config --init must create ~/.ora/config.yaml on a fresh HOME."""
@@ -171,6 +212,69 @@ class TestCLI:
         runner = CliRunner()
         result = runner.invoke(main, ["research"])
         assert result.exit_code != 0
+
+    def test_research_refuses_to_start_without_decodo_key(self, monkeypatch):
+        """A missing Decodo key must fail before a plan is generated."""
+        from ora import cli as cli_module
+
+        plan_graph_calls = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                plan_graph_calls.append(state)
+                return {"research_plan": "# Plan", "plan_approved": True, "messages": ["# Plan"]}
+
+        settings = _fake_settings()
+        settings.search = SimpleNamespace(
+            provider="decodo",
+            firecrawl_api_url="http://localhost:3002",
+            decodo_api_key_env="DECODO_API_KEY",
+        )
+        monkeypatch.setattr(cli_module, "load_config", lambda: settings)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.delenv("DECODO_API_KEY", raising=False)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "-y", "--no-save"])
+
+        assert result.exit_code != 0
+        assert "DECODO_API_KEY" in result.output
+        assert plan_graph_calls == [], "a plan was generated despite the missing Decodo key"
+
+    def test_research_refuses_to_start_when_decodo_key_is_rejected(self, monkeypatch):
+        """A key Decodo rejects must fail before a plan is generated."""
+        from ora import cli as cli_module
+        from ora.tools import search as search_mod
+
+        plan_graph_calls = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                plan_graph_calls.append(state)
+                return {"research_plan": "# Plan", "plan_approved": True, "messages": ["# Plan"]}
+
+        settings = _fake_settings()
+        settings.search = SimpleNamespace(
+            provider="decodo",
+            firecrawl_api_url="http://localhost:3002",
+            decodo_api_key_env="DECODO_API_KEY",
+            decodo_api_url="https://scraper-api.decodo.com/v2/scrape",
+        )
+        monkeypatch.setattr(cli_module, "load_config", lambda: settings)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setenv("DECODO_API_KEY", "wrong-key")
+        monkeypatch.setattr(
+            search_mod.requests,
+            "post",
+            lambda *a, **kw: SimpleNamespace(status_code=401, json=lambda: {"status": "failed"}),
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "-y", "--no-save"])
+
+        assert result.exit_code != 0
+        assert "DECODO_API_KEY" in result.output
+        assert plan_graph_calls == [], "a plan was generated despite the rejected key"
 
     def test_research_default_passes_progress_callback(self, monkeypatch):
         from ora import cli as cli_module
@@ -236,6 +340,45 @@ class TestCLI:
         assert result.exit_code == 0
         assert received_configs == [None]
 
+    def test_research_banner_lists_all_four_roles(self, monkeypatch):
+        """The startup banner must name Supervisor, Researcher, Writer, and
+        Reviewer with their resolved models, not just Researcher and Reviewer."""
+        from ora import cli as cli_module
+
+        settings = _fake_settings()
+        settings.models = SimpleNamespace(
+            default="m-default",
+            researcher="m-researcher",
+            supervisor="m-supervisor",
+            writer="m-writer",
+            reviewer="m-reviewer",
+        )
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: settings)
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        # Cancel at the approval prompt so the real research phase never runs.
+        monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "C")
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "--intensity", "3", "--no-save"])
+
+        assert result.exit_code == 0
+        assert "Supervisor: m-supervisor" in result.output
+        assert "Researcher: m-researcher" in result.output
+        assert "Writer:     m-writer" in result.output
+        assert "Reviewer:   m-reviewer" in result.output
+
     def test_research_warns_when_reviewer_flags_are_ignored(self, monkeypatch):
         from ora import cli as cli_module
 
@@ -262,6 +405,108 @@ class TestCLI:
         assert result.exit_code == 0
         assert "--no-review is only relevant for intensity 3+" in result.output
         assert "--max-revisions is only relevant for intensity 3+" in result.output
+
+    def _patch_research_graph(self, monkeypatch, research_final_state):
+        """Monkeypatch the CLI research flow to return a fixed final state
+        from a fake research graph (follows the existing FakeGraph style)."""
+        from ora import cli as cli_module
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                return research_final_state
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "A")
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+    def test_research_warns_on_revise_capped_end(self, monkeypatch):
+        """A final REVISE verdict capped by the revision budget must surface a
+        warning with the open/exhausted item counts."""
+        from ora.state import ReviewVerdict
+
+        self._patch_research_graph(
+            monkeypatch,
+            {
+                "draft_report": "# Research\nbody\n\n## Changes made\n- partial.\n",
+                "sources": [],
+                "findings": [],
+                "review_verdict": ReviewVerdict(verdict="REVISE", blocking=["still missing"]),
+                "review_items": [
+                    {"category": "blocking", "text": "still missing", "status": "open"}
+                ],
+                "revision_count": 3,
+            },
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "--no-save"])
+
+        assert result.exit_code == 0
+        assert "Report finalized with unresolved review items: 1 open, 0 exhausted" in result.output
+
+    def test_research_warns_on_pass_with_accepted_gaps(self, monkeypatch):
+        """A final PASS that accepted evidence gaps (unresolvable_gaps) also
+        surfaces the gap count so the user checks the report's evidence notes."""
+        from ora.state import ReviewVerdict
+
+        self._patch_research_graph(
+            monkeypatch,
+            {
+                "draft_report": "# Research\nbody\n\n## Evidence gaps\nNot available.\n",
+                "sources": [],
+                "findings": [],
+                "review_verdict": ReviewVerdict(
+                    verdict="PASS",
+                    unresolvable_gaps=["2026 market data unavailable"],
+                ),
+                "review_items": [],
+                "revision_count": 2,
+            },
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "--no-save"])
+
+        assert result.exit_code == 0
+        assert "Report finalized with unresolved review items: 0 open, 1 exhausted" in result.output
+        # M4: the accepted evidence-gap text is printed so the fold path is
+        # auditable from the CLI.
+        assert "Accepted evidence gaps:" in result.output
+        assert "- 2026 market data unavailable" in result.output
+
+    def test_research_warning_truncates_long_gap_text(self, monkeypatch):
+        """Gap text samples in the end warning are truncated to ~80 chars."""
+        from ora.state import ReviewVerdict
+
+        long_gap = "This accepted evidence gap has an extremely long explanatory sentence " * 2
+        self._patch_research_graph(
+            monkeypatch,
+            {
+                "draft_report": "# Research\nbody",
+                "sources": [],
+                "findings": [],
+                "review_verdict": ReviewVerdict(verdict="PASS", unresolvable_gaps=[long_gap]),
+                "review_items": [],
+                "revision_count": 2,
+            },
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["research", "Rust vs Go", "--no-save"])
+
+        assert result.exit_code == 0
+        assert "Accepted evidence gaps:" in result.output
+        assert long_gap[:50] in result.output
+        # Truncated with an ellipsis, not the full text.
+        assert "..." in result.output
+        assert long_gap not in result.output
 
     def test_research_edit_path_modifies_plan(self, monkeypatch):
         from ora import cli as cli_module
@@ -576,3 +821,189 @@ class TestCLI:
         # Model overrides travel via config, not via graph state.
         assert "researcher_model" not in received_states[0]
         assert "reviewer_model" not in received_states[0]
+
+    def test_research_passes_max_revisions_flag_into_graph_state(self, monkeypatch):
+        """An explicit --max-revisions flag must reach the research graph as
+        plan_result['max_revisions'] (intensity 3+ so the cap is live)."""
+        from ora import cli as cli_module
+
+        received_states = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                received_states.append(state)
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "research",
+                "Rust vs Go",
+                "-y",
+                "--intensity",
+                "3",
+                "--max-revisions",
+                "5",
+                "--no-save",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert received_states
+        assert received_states[0]["max_revisions"] == 5
+
+    def test_research_honors_config_limits_max_revisions_when_flag_default(self, monkeypatch):
+        """When --max-revisions is not passed (flag None), the configured
+        settings.limits.max_revisions value is wired into the graph state."""
+        from ora import cli as cli_module
+
+        settings = _fake_settings()
+        settings.limits = SimpleNamespace(max_revisions=5, default_intensity=2)
+        received_states = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                received_states.append(state)
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: settings)
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["research", "Rust vs Go", "-y", "--intensity", "3", "--no-save"],
+        )
+
+        assert result.exit_code == 0
+        assert received_states
+        assert received_states[0]["max_revisions"] == 5
+
+    def test_explicit_max_revisions_three_overrides_config_five(self, monkeypatch):
+        """--max-revisions 3 must beat config limits.max_revisions=5 (None sentinel)."""
+        from ora import cli as cli_module
+
+        received_states = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                received_states.append(state)
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        fake = _fake_settings()
+        fake.limits = SimpleNamespace(max_revisions=5)
+        monkeypatch.setattr(cli_module, "load_config", lambda: fake)
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr(cli_module.click, "prompt", lambda *a, **kw: "A")
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["research", "Rust vs Go", "--no-save", "--max-revisions", "3"]
+        )
+
+        assert result.exit_code == 0
+        assert received_states[0]["max_revisions"] == 3
+
+    def test_research_accepts_explicit_single_revision_flag(self, monkeypatch):
+        """An explicit --max-revisions 1 (single-audit budget) is accepted and
+        reaches the graph state; IntRange lower bound is inclusive."""
+        from ora import cli as cli_module
+
+        received_states = []
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                received_states.append(state)
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "research",
+                "Rust vs Go",
+                "-y",
+                "--intensity",
+                "3",
+                "--max-revisions",
+                "1",
+                "--no-save",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert received_states
+        assert received_states[0]["max_revisions"] == 1
+
+    @pytest.mark.parametrize("value", ["0", "-1"])
+    def test_research_rejects_invalid_max_revisions_values(self, monkeypatch, value):
+        """M1: 0 and negative budgets are rejected at option parse time
+        (click.IntRange(min=1)) instead of being misinterpreted."""
+        from ora import cli as cli_module
+
+        class FakePlanGraph:
+            def invoke(self, state, config=None):
+                return {"research_plan": "# Plan", "plan_approved": False, "messages": ["# Plan"]}
+
+        class FakeResearchGraph:
+            def invoke(self, state, config=None):
+                return {"draft_report": "# Research\nbody", "sources": [], "findings": []}
+
+        monkeypatch.setattr(cli_module, "load_config", lambda: _fake_settings())
+        monkeypatch.setattr(cli_module, "_spin", lambda func, message="Working...": func())
+        monkeypatch.setattr(cli_module, "_print_markdown", lambda text: None)
+        monkeypatch.setattr("ora.graph.build_plan_graph", lambda: FakePlanGraph())
+        monkeypatch.setattr("ora.graph.build_research_graph", lambda *a, **kw: FakeResearchGraph())
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "research",
+                "Rust vs Go",
+                "-y",
+                "--intensity",
+                "3",
+                "--max-revisions",
+                value,
+                "--no-save",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "Invalid value" in result.output

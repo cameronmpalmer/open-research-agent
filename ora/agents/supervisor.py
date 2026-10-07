@@ -1,5 +1,6 @@
 """Supervisor agent node for LangGraph."""
 
+import ast
 import json
 import re
 from typing import Any, Literal
@@ -23,6 +24,32 @@ def _invoke_supervisor(prompt: str) -> str:
 
 _FENCE_RE = re.compile(r"```\s*search_queries\s*\n(.*?)```", re.DOTALL)
 
+# Hard cap on total reviewer audits, the initial draft audit included: 1 is a
+# single audit with no revision passes, and N permits at most N-1 revision
+# passes. Shared by the routing budget (route_after_reviewer) and the
+# reviewer's audit context (audit_number / max_audits) so the reviewer knows
+# when it is at its final audit.
+MAX_REVISIONS = 3
+
+
+def _verdict_value(state: ResearchState) -> str:
+    """Return the review verdict string from state, tolerating both a
+    ReviewVerdict model and its dict form (e.g. from a checkpoint).
+
+    The value is normalized to upper case before comparison so a
+    checkpointed lowercase "pass" is not misread as a revision request.
+
+    Falls back to "REVISE" when the recorded verdict carries no readable
+    value, matching the pre-existing routing assumption that a review object
+    without a PASS verdict is a revision request.
+    """
+    verdict = state.get("review_verdict")
+    if isinstance(verdict, dict):
+        raw = verdict.get("verdict", "REVISE")
+    else:
+        raw = getattr(verdict, "verdict", "REVISE")
+    return str(raw).upper() if raw else "REVISE"
+
 
 def _search_queries_fence_found(plan_text: str) -> bool:
     """Return True if the plan text contains a search_queries code fence,
@@ -30,31 +57,57 @@ def _search_queries_fence_found(plan_text: str) -> bool:
     return bool(_FENCE_RE.search(plan_text))
 
 
-def _extract_search_queries(plan_text: str) -> list[str]:
-    """Extract JSON search queries from supervisor response code fence.
+def _parse_query_list(text: str) -> list[str] | None:
+    """Parse one text blob into a list of strings, or return None.
 
-    Returns empty list on any failure (no fence, bad JSON, wrong type).
+    Tries JSON first, then Python literal eval (LLMs sometimes use single
+    quotes). Only a list whose items are all strings is accepted.
+    """
+    try:
+        result = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        try:
+            result = ast.literal_eval(text)
+        except (ValueError, SyntaxError):
+            return None
+
+    if isinstance(result, list) and all(isinstance(s, str) for s in result):
+        return result
+    return None
+
+
+def _extract_search_queries(plan_text: str) -> list[str]:
+    """Extract search queries from the supervisor response code fence.
+
+    Returns empty list on any failure (no fence, unparseable block, wrong
+    type). Accepts a single JSON/Python list spanning the whole block, and
+    recovers the shape where the model emitted one independent array per
+    line: every nonblank line must then be a list of strings, and the
+    ordered queries are flattened. A malformed line rejects the whole
+    block rather than salvaging a partial list.
     """
     m = _FENCE_RE.search(plan_text)
     if not m:
         return []
 
-    json_str = m.group(1).strip()
+    block = m.group(1).strip()
 
-    # Try JSON first, then Python literal eval (LLMs sometimes use single quotes)
-    try:
-        result = json.loads(json_str)
-    except (json.JSONDecodeError, ValueError):
-        try:
-            import ast
+    whole = _parse_query_list(block)
+    if whole is not None:
+        return whole
 
-            result = ast.literal_eval(json_str)
-        except (ValueError, SyntaxError):
+    queries: list[str] = []
+    saw_line = False
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        saw_line = True
+        parsed = _parse_query_list(stripped)
+        if parsed is None:
             return []
-
-    if isinstance(result, list) and all(isinstance(s, str) for s in result):
-        return result
-    return []
+        queries.extend(parsed)
+    return queries if saw_line else []
 
 
 def plan_node(state: ResearchState, config: RunnableConfig = None) -> dict[str, Any]:
@@ -132,17 +185,41 @@ def route_after_writer(state: ResearchState) -> Literal["reviewer", "__end__"]:
 
 
 def route_after_reviewer(state: ResearchState) -> Literal["researcher", "__end__"]:
-    """Route after review: revise if needed, end if pass or max revisions."""
+    """Route after review: revise while open review items remain, end on
+    PASS, on budget exhaustion, or when nothing actionable is left.
+
+    The REVISE branch is a convergent guard, not a blind counter: it only
+    sends execution back to the researcher while at least one open
+    (non-exhausted) review item remains. Zero-progress passes still route
+    back while an open item remains (letting per-item attempts accumulate
+    across passes); when the researcher has exhausted every item, the next
+    audit closes them as unresolvable gaps and the loop stops.
+    """
     verdict = state.get("review_verdict")
     if verdict is None:
         return "__end__"
 
-    v = verdict.verdict if hasattr(verdict, "verdict") else "REVISE"
+    v = _verdict_value(state)
     revision_count = state.get("revision_count", 0)
+    # The routing budget is the state's max_revisions when the CLI/config
+    # wired one in; otherwise the module constant (3). Both default to 3, so
+    # a state without the key keeps the historical cap. An explicit None
+    # check, not truthiness, so a wired-in 0 or negative budget is honored
+    # as-is instead of being silently raised to MAX_REVISIONS.
+    max_revisions = state.get("max_revisions")
+    cap = max_revisions if max_revisions is not None else MAX_REVISIONS
 
     if v == "PASS":
         return "__end__"
-    elif revision_count < 3:
-        return "researcher"
+    elif revision_count < cap:
+        # Convergent loop: only keep revising while at least one open
+        # (non-exhausted) review item remains. Zero-progress passes still
+        # route back while an open item remains, letting per-item attempts
+        # accumulate across passes; when all items are exhausted the next
+        # audit closes them as unresolvable gaps.
+        open_items = [i for i in state.get("review_items", []) if i.get("status") == "open"]
+        if open_items:
+            return "researcher"
+        return "__end__"
     else:
         return "__end__"

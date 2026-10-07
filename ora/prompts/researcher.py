@@ -39,3 +39,25 @@ Generate exactly {count} new search queries that:
 4. Target the gaps identified by the reviewer (if feedback was provided)
 
 Return ONLY the queries, one per line. No numbering, no bullet points, no explanations."""
+
+
+ITEM_GAP_QUERY_PROMPT = """You are a research query strategist closing specific gaps flagged by an
+adversarial reviewer. For EACH review item below, produce query variants that
+would surface evidence directly about that item.
+
+Original research question: {query}
+
+Review items:
+{review_items}
+
+Context: the researcher already executed these queries (do not repeat):
+{already_run}
+
+Requirements:
+- Output exactly {count} queries, one per line, no numbering.
+- For each item: give 2-3 DIFFERENT phrasings; use site: operators when the
+  item names a known domain; use a non-English query variant when the item
+  implies non-English primary sources (state the language in the item).
+- Queries must be concrete and searchable, not generic restatements.
+- Do NOT output queries already in the executed list.
+"""

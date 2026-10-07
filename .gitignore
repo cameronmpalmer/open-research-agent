@@ -17,4 +17,11 @@ htmlcov/
 *-20??-??-??-??????.md
 
 # Internal development documentation
-docs/
+docs/superpowers/
+
+# Benchmark runner artifacts (worktree files from feat/benchmark-runner)
+benchmarks/.bench-venv/
+benchmarks/results/
+
+# Local HuggingFace model cache (disposable, not source)
+/models/

@@ -56,6 +56,7 @@ class ReviewVerdict(BaseModel):
     suggested: list[str] = Field(default_factory=list)
     contradicting_evidence_found: list[str] = Field(default_factory=list)
     confidence_recalibrations: dict[str, str] = Field(default_factory=dict)
+    unresolvable_gaps: list[str] = Field(default_factory=list)
 
 
 class SourceExtraction(BaseModel):
@@ -98,9 +99,21 @@ class ResearchState(TypedDict, total=False):
     draft_report: str
     revision_count: int
 
+    # Review budget: optional run-scoped cap on total reviewer audits
+    # (the initial draft audit included, so 1 = a single audit with no
+    # revision passes), wired from the CLI --max-revisions flag / config
+    # limits.max_revisions by ora.cli.research. Absent -> MAX_REVISIONS (3).
+    max_revisions: int
+
     # Review
     review_verdict: ReviewVerdict
     review_verdict_raw: str  # JSON string for structured output parsing
+
+    # Review loop (convergent REVISE)
+    review_items: list[dict]  # [{category, text, status: open|evidence_exhausted}]
+    last_round_new_sources: int
+    last_round_new_findings: int
+    writer_change_notes: str
 
     # Output
     final_report: str

@@ -7,11 +7,17 @@ whether and how to render events.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Literal, TypedDict
 
 ProgressKind = Literal["info", "search", "scrape", "success", "error", "warning", "write"]
 
 logger = logging.getLogger(__name__)
+
+# The researcher runs scrape+extract in worker threads, and the extractor can
+# emit progress from a worker on its failure paths. Serialize callbacks so
+# callers do not have to be thread-safe (the CLI writes to stdout).
+_progress_lock = threading.Lock()
 
 
 class ProgressEvent(TypedDict):
@@ -33,7 +39,8 @@ def emit_progress(config: dict[str, Any] | None, message: str, kind: ProgressKin
         return
 
     try:
-        callback({"message": message, "kind": kind})
+        with _progress_lock:
+            callback({"message": message, "kind": kind})
     except Exception:
         logger.debug("progress callback failed", exc_info=True)
         return

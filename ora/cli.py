@@ -17,7 +17,9 @@ from ora.config import (
     get_researcher_model,
     get_reviewer_model,
     get_supervisor_model,
+    get_writer_model,
     load_config,
+    search_config_error,
     set_model_override,
 )
 from ora.usage import UsageCollector, usage_collection
@@ -150,7 +152,16 @@ def _run_collected(collector: UsageCollector, func, *args, **kwargs):
     "--model", "-m", default=None, help="LLM model for researcher/writer (e.g., deepseek-v4-flash)"
 )
 @click.option("--reviewer-model", "-r", default=None, help="LLM model for adversarial reviewer")
-@click.option("--max-revisions", type=int, default=3, help="Max writer-reviewer revision cycles")
+@click.option(
+    "--max-revisions",
+    type=click.IntRange(min=1),
+    default=None,
+    help=(
+        "Maximum reviewer audits including the initial draft audit "
+        "(1 = single audit, no revisions; config default 3 permits up to two "
+        "revision passes; default: config limits.max_revisions)"
+    ),
+)
 @click.option("--no-review", is_flag=True, help="Skip adversarial review")
 @click.option(
     "--quiet", is_flag=True, help="Disable live progress indicators and use spinner-only output"
@@ -185,11 +196,34 @@ def research(
     """Run the full research pipeline."""
     click.echo(f"ORA Research: {query}")
     settings = load_config()
-    researcher_model_name = model or settings.models.researcher or settings.models.default
-    reviewer_model_name = reviewer_model or settings.models.reviewer or settings.models.default
-    click.echo(
-        f"  Intensity: {intensity} | Researcher: {researcher_model_name} | Reviewer: {reviewer_model_name}"
-    )
+
+    # Fail before generating a plan: a search backend that cannot run would
+    # otherwise burn a plan and produce a report with no sources.
+    config_error = search_config_error(settings)
+    if config_error:
+        raise click.ClickException(config_error)
+
+    # Presence is not correctness: confirm the credential is accepted before
+    # paying for a plan that would only fail once research starts.
+    from ora.tools.search import validate_search_credentials
+
+    credentials_error = validate_search_credentials(settings.search)
+    if credentials_error:
+        raise click.ClickException(credentials_error)
+
+    # CLI model flags become run-scoped config overrides before the banner and
+    # the plan are produced, so both reflect the flags. Every agent and internal
+    # helper resolves its model through the same config path.
+    if model:
+        set_model_override("researcher", model)
+    if reviewer_model:
+        set_model_override("reviewer", reviewer_model)
+
+    click.echo(f"  Intensity: {intensity}")
+    click.echo(f"  Supervisor: {get_supervisor_model(settings)}")
+    click.echo(f"  Researcher: {get_researcher_model(settings)}")
+    click.echo(f"  Writer:     {get_writer_model(settings)}")
+    click.echo(f"  Reviewer:   {get_reviewer_model(settings)}")
 
     from ora.graph import build_plan_graph, build_research_graph
 
@@ -274,12 +308,12 @@ def research(
     click.echo()
     research_graph = build_research_graph(intensity=intensity, no_review=no_review)
     plan_result["plan_approved"] = True
-    # CLI model flags become run-scoped config overrides so every agent and
-    # internal helper resolves them through the same config path.
-    if model:
-        set_model_override("researcher", model)
-    if reviewer_model:
-        set_model_override("reviewer", reviewer_model)
+    # Wire the revision budget into the research graph: an explicit
+    # --max-revisions flag wins (None = flag unset, so the configured
+    # limits.max_revisions value is honored instead). Both default to 3, so
+    # the flag-unset path and the config default agree.
+    effective_cap = max_revisions if max_revisions is not None else settings.limits.max_revisions
+    plan_result["max_revisions"] = effective_cap
     try:
         if quiet:
             final_state = _spin(
@@ -299,7 +333,7 @@ def research(
     if intensity < 3:
         if no_review:
             click.echo("  Note: --no-review is only relevant for intensity 3+.", err=True)
-        if max_revisions != 3:
+        if max_revisions is not None and max_revisions != 3:
             click.echo("  Note: --max-revisions is only relevant for intensity 3+.", err=True)
 
     sources_count = len(final_state.get("sources") or [])
@@ -319,6 +353,37 @@ def research(
             err=True,
         )
         return
+
+    # Surface a REVISE-capped or gap-accepting end: when the final audit
+    # still ended on REVISE (revision budget exhausted with open items) or
+    # accepted evidence gaps, the user should know the report finalized with
+    # unresolved review items rather than assuming a clean PASS.
+    if final_state.get("review_verdict") is not None:
+        from ora.agents.supervisor import _verdict_value
+
+        review_verdict = final_state.get("review_verdict")
+        if isinstance(review_verdict, dict):
+            gap_texts = list(review_verdict.get("unresolvable_gaps") or [])
+        else:
+            gap_texts = list(getattr(review_verdict, "unresolvable_gaps", None) or [])
+        review_items = final_state.get("review_items") or []
+        open_items = [i for i in review_items if i.get("status") == "open"]
+        exhausted_items = [i for i in review_items if i.get("status") == "evidence_exhausted"]
+        if _verdict_value(final_state) == "REVISE" or open_items or gap_texts or exhausted_items:
+            n = len(open_items)
+            m = len(exhausted_items) + len(gap_texts)
+            click.echo(
+                f"  ⚠️  Report finalized with unresolved review items: {n} open,"
+                f" {m} exhausted (see report's Changes made / evidence notes).",
+                err=True,
+            )
+            # Show the accepted evidence-gap texts so the fold path is
+            # auditable from the CLI (sample at most 3, ~80 chars each).
+            if gap_texts:
+                click.echo("  Accepted evidence gaps:", err=True)
+                for gap in gap_texts[:3]:
+                    snippet = gap if len(gap) <= 80 else gap[:77] + "..."
+                    click.echo(f"    - {snippet}", err=True)
 
     draft = final_state.get("final_report") or final_state.get(
         "draft_report", "No report generated."
@@ -413,9 +478,9 @@ def config(show, init):
     settings = load_config()
     click.echo(f"Config file: {config_path}")
     click.echo()
-    click.echo(f"Supervisor (planning & routing): {get_supervisor_model(settings)}")
+    click.echo(f"Supervisor (planning): {get_supervisor_model(settings)}")
     click.echo(f"Researcher (web search & source eval): {get_researcher_model(settings)}")
-    click.echo(f"Writer (report synthesis): {get_researcher_model(settings)}")
+    click.echo(f"Writer (report synthesis): {get_writer_model(settings)}")
     click.echo(f"Reviewer (adversarial audit): {get_reviewer_model(settings)}")
     click.echo()
     click.echo(f"Search backend: {settings.search.provider}")
@@ -431,7 +496,7 @@ def config(show, init):
             f"  {name}: {resolved.base_url} (key env: {key_env or 'n/a'}, key set: {key_set})"
         )
     click.echo()
-    click.echo(f"Max revisions: {settings.limits.max_revisions}")
+    click.echo(f"Max reviewer audits: {settings.limits.max_revisions}")
     click.echo()
 
     from ora.agents.researcher import LEVEL_PARAMS

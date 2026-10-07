@@ -1,6 +1,9 @@
 """Researcher agent node for LangGraph."""
 
+import contextvars
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from urllib.parse import urlparse
 
@@ -8,7 +11,7 @@ from langchain_core.runnables import RunnableConfig
 
 from ora.config import get_llm, get_researcher_model, load_config
 from ora.progress import emit_progress
-from ora.prompts import GAP_QUERY_PROMPT
+from ora.prompts import GAP_QUERY_PROMPT, ITEM_GAP_QUERY_PROMPT
 from ora.state import Finding, ResearchState, Source
 
 # Domains known to block or heavily rate-limit automated scraping.
@@ -241,6 +244,33 @@ def _format_reviewer_feedback(state: ResearchState) -> str:
     return "\n\n".join(parts)
 
 
+def _parse_query_lines(text: str, limit: int | None = None) -> list[str]:
+    """Parse one-query-per-line LLM output into a query list.
+
+    Uses regex markers so content that starts with digits or hyphens
+    survives: strips "1. ", "1) ", "- ", and "* " list markers only, not
+    content-leading digits (e.g. a year) or content hyphens (e.g. "-1
+    penalty"). When limit is given, returns at most that many queries
+    (matching the slicing generate_gap_queries_dynamic applied after
+    parsing).
+    """
+    queries = []
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Strip "1. " and "1) " numbering prefixes only (not bare digits).
+        line = re.sub(r"^\d+[\.\)]\s*", "", line)
+        # Strip bullet markers "- " and "* " only when not followed by a
+        # digit, so "-1 penalty" is preserved but "- something" is stripped.
+        line = re.sub(r"^[-*]\s+(?!\d)", "", line)
+        if line:
+            queries.append(line)
+    if limit is not None:
+        return queries[:limit]
+    return queries
+
+
 def generate_gap_queries_dynamic(
     query: str,
     intensity: int,
@@ -295,19 +325,9 @@ def generate_gap_queries_dynamic(
         emit_progress(config, "Researcher: gap query LLM failed, using templates", kind="warning")
         return generate_gap_queries(query, intensity)
 
-    # Parse: one query per line, strip numbering and bullets.
-    queries = []
-    for line in text.strip().split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        # Strip "1. ", "1) " prefixes only (not content hyphens).
-        line = re.sub(r"^\d+[\.\)]\s*", "", line)
-        # Strip bullet markers like "- " and "* " only when followed by non-digit,
-        # so "-1 penalty" is preserved but "- something" is stripped.
-        line = re.sub(r"^[-*]\s+(?!\d)", "", line)
-        if line:
-            queries.append(line)
+    # Parse: one query per line, strip list markers. Shared helper so the
+    # flat and per-item generators accept the same LLM output shapes.
+    queries = _parse_query_lines(text, limit=count)
 
     if not queries:
         emit_progress(
@@ -315,7 +335,181 @@ def generate_gap_queries_dynamic(
         )
         return generate_gap_queries(query, intensity)
 
-    return queries[:count]
+    return queries
+
+
+def _fresh(queries, executed_queries: set[str]) -> list[str]:
+    """Deduplicate a query list against executed queries."""
+    return [q for q in queries if q not in executed_queries]
+
+
+def generate_gap_queries_for_items(
+    query: str,
+    intensity: int,
+    items: list[dict],
+    executed_queries: set[str],
+    sources: list | None = None,
+    config: RunnableConfig | None = None,
+) -> list[str]:
+    """Generate per-item gap queries for open review items.
+
+    Falls back to generate_gap_queries_dynamic when there are no open
+    blocking/required items (first-pass behavior), the LLM call fails, or
+    the LLM returns no usable queries. sources (when given) give the
+    dynamic fallback real source context instead of an empty summary.
+    """
+    sources = sources or []
+    open_items = [i for i in items if i.get("status") == "open"]
+    if not open_items or intensity < 3:
+        return generate_gap_queries_dynamic(query, intensity, sources, "", executed_queries, config)
+
+    count = {3: 6, 4: 9, 5: 12}.get(intensity, 6)
+    if len(open_items) > 6:
+        # The prompt only carries the first 6 items, so exhaustion decisions
+        # over larger item sets are visible in the progress stream.
+        emit_progress(
+            config,
+            f"Researcher: {len(open_items)} open review items, generating queries for the first 6",
+            kind="warning",
+        )
+    item_lines = "\n".join(f"- [{i['category']}] {i['text']}" for i in open_items[:6])
+    executed_sorted = sorted(executed_queries)
+    already_run = "\n".join(f"- {q}" for q in executed_sorted[-30:]) or "(none yet)"
+
+    try:
+        settings = load_config()
+        llm = get_llm(get_researcher_model(settings), temperature=0.8)
+        response = llm.invoke(
+            ITEM_GAP_QUERY_PROMPT.format(
+                query=query,
+                review_items=item_lines,
+                already_run=already_run,
+                count=count,
+            )
+        )
+        text = response.content if hasattr(response, "content") else str(response)
+    except Exception:  # noqa: BLE001
+        emit_progress(
+            config, "Researcher: item gap query LLM failed, using defaults", kind="warning"
+        )
+        return generate_gap_queries_dynamic(query, intensity, sources, "", executed_queries, config)
+
+    queries = []
+    for parsed in _parse_query_lines(text, limit=count):
+        if len(parsed) > 4 and parsed not in queries:
+            queries.append(parsed)
+    if not queries:
+        emit_progress(
+            config,
+            "Researcher: item gap query LLM returned no usable queries, using defaults",
+            kind="warning",
+        )
+        return generate_gap_queries_dynamic(query, intensity, sources, "", executed_queries, config)
+    return _fresh(queries, executed_queries)
+
+
+def _research_concurrency() -> int:
+    """Bounded parallelism for scrape+extract. Env-tunable, minimum 1."""
+    try:
+        return max(1, int(os.environ.get("ORA_RESEARCH_CONCURRENCY", "4")))
+    except ValueError:
+        return 4
+
+
+def _scrape_and_extract_one(
+    url: str,
+    normalized_url: str,
+    title: str,
+    max_content_chars: int,
+    query: str,
+    intensity: int,
+    model_name: str,
+    config: RunnableConfig | None,
+) -> dict:
+    """Scrape one URL and evaluate it. Safe to call from a worker thread.
+
+    Never raises: all failures are reported in the returned dict so a single bad
+    URL cannot abort the batch.
+    """
+    from ora.tools.evaluate import evaluate_source
+    from ora.tools.extract import extract_and_evaluate
+    from ora.tools.scrape import scrape_page
+
+    display_url = url.replace("https://", "").replace("http://", "")[:80]
+    out = {
+        "url": url,
+        "normalized_url": normalized_url,
+        "ok": False,
+        "source": None,
+        "extraction": None,
+        "claim_text": "",
+        "log": [],
+        "events": [],
+    }
+    try:
+        content = scrape_page.invoke({"url": url})
+    except Exception as e:  # noqa: BLE001
+        out["log"].append(f"  Scraped: 0 chars from {url[:60]} (FAIL: {e})")
+        out["events"].append((f"Researcher: scrape failed for {display_url}", "error"))
+        return out
+
+    # Coerce defensively so a non-str tool return cannot raise below and
+    # abort the whole batch via fut.result().
+    if not isinstance(content, str):
+        content = str(content)
+
+    is_error = content.startswith(("Scrape error", "Scrape failed", "No content extracted"))
+    out["log"].append(
+        f"  Scraped: {len(content)} chars from {url[:60]} {'(FAIL)' if is_error else ''}"
+    )
+    if is_error:
+        out["events"].append((f"Researcher: scrape failed for {display_url}", "error"))
+        return out
+
+    out["events"].append(
+        (f"Researcher: scraped {len(content)} chars from {display_url}", "success")
+    )
+
+    try:
+        content = content[:max_content_chars]
+        if intensity >= 3:
+            source, extraction = extract_and_evaluate(
+                url=url,
+                title=title,
+                content=content,
+                source_type="unknown",
+                query=query,
+                config=config,
+                max_chars=max_content_chars,
+                model_name=model_name,
+            )
+            claim_text = extraction.summary if extraction.summary else content[:500]
+            out["log"].append(
+                f"  Extracted: {len(extraction.key_claims)} claims, "
+                f"{len(extraction.recommendations)} recommendations, "
+                f"reliability={extraction.source_reliability}"
+            )
+        else:
+            source = evaluate_source(url=url, title=title, content=content, source_type="unknown")
+            extraction = None
+            claim_text = content[:500]
+    except Exception as e:  # noqa: BLE001
+        out["log"].append(f"  Source eval failed from {url[:60]}: {e}")
+        out["events"].append((f"Researcher: source evaluation failed for {display_url}", "error"))
+        source = Source(
+            url=url,
+            title="",
+            source_type="unknown",
+            overall_reliability="Low",
+            notes=f"Source evaluation failed: {e}",
+        )
+        extraction = None
+        claim_text = content[:500] if content else ""
+    else:
+        out["events"].append(("Researcher: evaluated source reliability", "info"))
+
+    out.update(ok=True, source=source, extraction=extraction, claim_text=claim_text)
+    return out
 
 
 def _scrape_and_collect(
@@ -328,7 +522,6 @@ def _scrape_and_collect(
     findings: list,
     seen_urls: set[str],
     url_titles: dict[str, str],
-    *_,
     min_sources: int,
     query: str = "",
     intensity: int = 2,
@@ -340,16 +533,22 @@ def _scrape_and_collect(
     Returns True if we've hit the overall min_sources target and the caller
     should stop further work.
     """
-    from ora.tools.evaluate import evaluate_source
-    from ora.tools.scrape import scrape_page
-
     scraped_this_query = 0
+    # Each entry carries both the raw URL and its normalized form so the
+    # dedupe key is computed once, not again per submit.
+    pending: list[tuple[str, str]] = []
+    pending_keys: set[str] = set()
     for url in urls[: params["urls_per_query"]]:
         if len(sources) >= min_sources and not force_scrape:
             return True
 
         normalized_url = _normalize_url_for_dedupe(url)
-        if normalized_url in seen_urls:
+        # Dedupe up front, including URLs already queued in this query. A
+        # duplicate is submitted exactly once even if its first attempt fails:
+        # the base behaviour retried a failed duplicate, but that would submit
+        # the same URL twice in one concurrent batch (two simultaneous scrapes
+        # of one page), which is worse than skipping the retry.
+        if normalized_url in seen_urls or normalized_url in pending_keys:
             display_url = url.replace("https://", "").replace("http://", "")[:80]
             log.append(f"  Skipping duplicate source URL: {url[:80]}")
             emit_progress(config, f"Researcher: skipping duplicate {display_url}", kind="info")
@@ -363,90 +562,97 @@ def _scrape_and_collect(
             )
             continue
 
-        display_url = url.replace("https://", "").replace("http://", "")[:80]
-        emit_progress(config, f"Researcher: scraping {display_url}", kind="scrape")
-        c = scrape_page.invoke({"url": url})
-        is_error = c.startswith(("Scrape error", "Scrape failed", "No content extracted"))
-        log.append(f"  Scraped: {len(c)} chars from {url[:60]} {'(FAIL)' if is_error else ''}")
-        if is_error:
-            emit_progress(config, f"Researcher: scrape failed for {display_url}", kind="error")
-            continue
+        pending.append((url, normalized_url))
+        pending_keys.add(normalized_url)
 
-        emit_progress(
-            config, f"Researcher: scraped {len(c)} chars from {display_url}", kind="success"
-        )
+    width = max(1, min(_research_concurrency(), params.get("scrapes_per_query", 4) or 4))
+    # One pool for the whole query: each batch is drained before the next is
+    # submitted, so per-batch isolation buys nothing and would repeatedly spin
+    # threads up and down on the hot path.
+    with ThreadPoolExecutor(max_workers=width) as pool:
+        start = 0
+        while start < len(pending):
+            if len(sources) >= min_sources and not force_scrape:
+                return True
+            if scraped_this_query >= params["scrapes_per_query"]:
+                # Cap already reached in a prior chunk: do not submit another
+                # batch of scrapes/extractions.
+                break
 
-        c = c[:max_content_chars]
-
-        # Normalize the URL for source URL tracking.
-        # source.url remains as-is (the original), seen_urls uses the normalized variant.
-        try:
-            if intensity >= 3:
-                # LLM-powered extraction + evaluation at high intensities.
-                from ora.tools.extract import extract_and_evaluate
-
-                source, extraction = extract_and_evaluate(
-                    url=url,
-                    title=url_titles.get(normalized_url, ""),
-                    content=c,
-                    source_type="unknown",
-                    query=query,
-                    config=config,
-                    max_chars=max_content_chars,
-                    model_name=model_name,
-                )
-                # Use the LLM-extracted summary as the claim (much richer than c[:500]).
-                claim_text = extraction.summary if extraction.summary else c[:500]
-                log.append(
-                    f"  Extracted: {len(extraction.key_claims)} claims, "
-                    f"{len(extraction.recommendations)} recommendations, "
-                    f"reliability={extraction.source_reliability}"
-                )
-            else:
-                # Heuristic evaluation for cost efficiency at low intensities.
-                source = evaluate_source(
-                    url=url,
-                    title=url_titles.get(normalized_url, ""),
-                    content=c,
-                    source_type="unknown",
-                )
-                extraction = None
-                claim_text = c[:500]
-        except Exception as e:  # noqa: BLE001
-            log.append(f"  Source eval failed from {url[:60]}: {e}")
+            # Slice to the remaining budget so a batch never scrapes (and, at
+            # intensity >= 3, LLM-extracts) past the per-query cap. Without
+            # this, cap=5 with width=4 runs 4 then another 4 and discards 3.
+            remaining = params["scrapes_per_query"] - scraped_this_query
+            chunk = pending[start : start + min(width, remaining)]
+            if not chunk:
+                break
+            # Advance by what the chunk consumed, not by width: when the budget
+            # truncates a chunk, stepping by width would silently skip the URLs
+            # between start + len(chunk) and start + width.
+            start += len(chunk)
             emit_progress(
-                config, f"Researcher: source evaluation failed for {display_url}", kind="error"
+                config,
+                f"Researcher: scraping {len(chunk)} pages concurrently",
+                kind="scrape",
             )
-            source = Source(
-                url=url,
-                title="",
-                source_type="unknown",
-                overall_reliability="Low",
-                notes=f"Source evaluation failed: {e}",
-            )
-            extraction = None
-            claim_text = c[:500] if c else ""
-        else:
-            emit_progress(config, "Researcher: evaluated source reliability", kind="info")
+            for url, _normalized in chunk:
+                display_url = url.replace("https://", "").replace("http://", "")[:80]
+                emit_progress(config, f"Researcher: scraping {display_url}", kind="scrape")
+            results: list[tuple[int, dict]] = []
+            # Copy the submitting context per task so workers inherit the
+            # active UsageCollector (ContextVars are not shared across threads).
+            futures = {
+                pool.submit(
+                    contextvars.copy_context().run,
+                    _scrape_and_extract_one,
+                    url,
+                    normalized_url,
+                    url_titles.get(normalized_url, ""),
+                    max_content_chars,
+                    query,
+                    intensity,
+                    model_name,
+                    config,
+                ): index
+                for index, (url, normalized_url) in enumerate(chunk)
+            }
+            for fut in as_completed(futures):
+                results.append((futures[fut], fut.result()))
 
-        finding_confidence = {
-            "High": "High",
-            "Medium": "Moderate",
-            "Low": "Low",
-        }.get(source.overall_reliability, "Unknown")
-        sources.append(source)
-        seen_urls.add(normalized_url)
-        findings.append(
-            Finding(
-                claim=claim_text,
-                confidence=finding_confidence,  # type: ignore[arg-type]
-                supporting_sources=[url],
-                extraction=extraction,
-            )
-        )
-        scraped_this_query += 1
-        if scraped_this_query >= params["scrapes_per_query"]:
-            break
+            results.sort(key=lambda item: item[0])
+
+            for position, (_, r) in enumerate(results):
+                log.extend(r["log"])
+                for message, kind in r["events"]:
+                    emit_progress(config, message, kind=kind)
+                if not r["ok"]:
+                    continue
+                if len(sources) >= min_sources and not force_scrape:
+                    # min_sources is met: record this batch's already-scraped
+                    # remainder as seen so a later revise pass does not re-scrape
+                    # (and re-extract) URLs we are dropping here.
+                    seen_urls.update(res["normalized_url"] for _, res in results[position:])
+                    return True
+
+                source, extraction, claim_text = r["source"], r["extraction"], r["claim_text"]
+                finding_confidence = {
+                    "High": "High",
+                    "Medium": "Moderate",
+                    "Low": "Low",
+                }.get(source.overall_reliability, "Unknown")
+                sources.append(source)
+                seen_urls.add(r["normalized_url"])
+                findings.append(
+                    Finding(
+                        claim=claim_text or "",
+                        confidence=finding_confidence,  # type: ignore[arg-type]
+                        supporting_sources=[r["url"]],
+                        extraction=extraction,
+                    )
+                )
+                scraped_this_query += 1
+                if scraped_this_query >= params["scrapes_per_query"]:
+                    break
 
     return len(sources) >= min_sources
 
@@ -490,6 +696,57 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
     # Reviewer feedback for targeted gap queries.
     reviewer_feedback = _format_reviewer_feedback(state)
     revise_round = bool(reviewer_feedback)
+    # Pass-level marker: revise_round is cleared after the first loop round
+    # (it only forces one extra evidence round when min_sources is already
+    # met), but the post-loop exhaustion rule below needs to know the whole
+    # pass was a review-driven revise.
+    revise_pass = bool(reviewer_feedback)
+
+    # Structured open review items from the last reviewer verdict. When any
+    # exist, gap queries target each item instead of the flat dynamic
+    # generator; items stay "open" until this pass either finds evidence for
+    # them or exhausts them below.
+    open_items = [i for i in state.get("review_items") or [] if i.get("status") == "open"]
+
+    def round_gap_queries() -> list[str]:
+        """Gap-query source for the current round, shared by the round-gap
+        branch and the duplicate-regeneration branch so both call identical
+        fallback logic: per-item generation when structured open review items
+        exist (its own fallbacks carry the same sources context), otherwise
+        the flat dynamic generator with prose reviewer feedback."""
+        if open_items:
+            return generate_gap_queries_for_items(
+                query=query,
+                intensity=intensity,
+                items=open_items,
+                executed_queries=executed_q_set,
+                sources=sources,
+                config=config,
+            )
+        return generate_gap_queries_dynamic(
+            query=query,
+            intensity=intensity,
+            sources=sources,
+            reviewer_feedback=reviewer_feedback,
+            executed_queries=executed_q_set,
+            config=config,
+        )
+
+    # Baseline for this pass's deltas. sources/findings are appended to in
+    # place by _scrape_and_collect inside the loop, so lengths captured here
+    # (before the loop) are the correct baseline for the counts returned as
+    # last_round_new_sources/last_round_new_findings.
+    start_sources = len(sources)
+    start_findings = len(findings)
+
+    # Search failures are tracked separately from empty results: a failed
+    # search is not an empty search, and a run that fails every search must
+    # fail loudly rather than write a report built from an error message.
+    search_failures: list[str] = []
+    # Only genuinely successful searches count toward the >= 2 floor the
+    # exhaustion rule below requires. A failed search is an infrastructure
+    # error, never evidence that the open items were investigated.
+    successful_searches = 0
 
     round_num = 0
 
@@ -501,23 +758,32 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             kind="info",
         )
 
+        # True on the forced revise round of a pass that already met
+        # min_sources with open review items: queries must be item-targeted
+        # and up to three of them searched before the round ends (see below).
+        item_targeted_revise = bool(revise_round and open_items and len(sources) >= min_sources)
+
         if round_num == 1:
-            plan_queries = state.get("search_queries", [])
-            if plan_queries:
-                queries_for_round = plan_queries
+            if item_targeted_revise:
+                # On this round, skip leftover plan search_queries: they are
+                # untargeted first-pass queries that the researcher never
+                # consumed, and zero-yield searches on them would trip the
+                # whole-pass exhaustion rule below without the per-item gap
+                # generator ever running. Go straight to the item-targeted
+                # path. Plan queries remain the round-1 source for first
+                # passes and for revise passes still chasing min_sources.
+                queries_for_round = round_gap_queries()
             else:
-                queries_for_round = list(generate_search_queries(query, intensity))
+                plan_queries = state.get("search_queries", [])
+                if plan_queries:
+                    queries_for_round = plan_queries
+                else:
+                    queries_for_round = list(generate_search_queries(query, intensity))
         else:
-            # Dynamic gap queries using LLM: adapt to what's been found and
-            # what the reviewer flagged. Falls back to templates on failure.
-            queries_for_round = generate_gap_queries_dynamic(
-                query=query,
-                intensity=intensity,
-                sources=sources,
-                reviewer_feedback=reviewer_feedback,
-                executed_queries=executed_q_set,
-                config=config,
-            )
+            # Gap queries: adapt to what's been found and what the reviewer
+            # flagged. Falls back to templates on failure. With structured
+            # open review items, target each item instead (see round_gap_queries).
+            queries_for_round = round_gap_queries()
 
         # Filter out queries already executed in any prior invocation.
         fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
@@ -529,16 +795,20 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
                 "Researcher: all gap queries were duplicates, regenerating...",
                 kind="warning",
             )
-            queries_for_round = generate_gap_queries_dynamic(
-                query=query,
-                intensity=intensity,
-                sources=sources,
-                reviewer_feedback=reviewer_feedback,
-                executed_queries=executed_q_set,
-                config=config,
-            )
+            queries_for_round = round_gap_queries()
             fresh_queries = [q for q in queries_for_round if q not in executed_q_set]
             if not fresh_queries:
+                if revise_round and open_items:
+                    # A revise pass with open items and nothing new to try:
+                    # stop instead of falling back to generic templates so the
+                    # writer/reviewer can close the loop (the whole pass is
+                    # judged by the exhaustion rule after the loop).
+                    emit_progress(
+                        config,
+                        "Researcher: no fresh queries for open review items, ending revise pass",
+                        kind="warning",
+                    )
+                    break
                 # LLM regeneration produced only duplicates -- fall back
                 # to template-based gap queries as a last resort.
                 queries_for_round = generate_gap_queries(query, intensity)
@@ -560,7 +830,16 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             kind="search",
         )
 
-        for q in fresh_queries:
+        # On an item-targeted revise round (min_sources already met), do NOT
+        # end the round after the first query: _scrape_and_collect returns
+        # True immediately at min_sources, which would otherwise give the
+        # open items only a single-query "attempt" per pass. Search up to
+        # three fresh queries instead so a genuine multi-query attempt happens
+        # within one pass (the exhaustion rule below requires >= 2 executed
+        # searches). Rounds still chasing min_sources keep the old behavior
+        # of searching every fresh query.
+        round_queries = fresh_queries if not item_targeted_revise else fresh_queries[:3]
+        for q in round_queries:
             if len(sources) >= min_sources and not revise_round:
                 break
 
@@ -568,10 +847,19 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             log.append(f"Search: {q}")
             emit_progress(config, f'Researcher: searching "{q}"', kind="search")
             r = web_search.invoke({"query": q})
+            if r.startswith(("Search error", "Search failed")):
+                # A failed search is not an empty result. Do not parse URLs out
+                # of the error text or fall through as if nothing matched, and
+                # record it so a run that fails every search fails loudly
+                # instead of writing a report built from an error message.
+                search_failures.append(r)
+                log.append(f"  Result: SEARCH FAILED: {r[:200]}")
+                emit_progress(
+                    config, f'Researcher: search failed for "{q}": {r[:180]}', kind="error"
+                )
+                continue
+            successful_searches += 1
             log.append(f"  Result: {len(r)} chars")
-            search_failed = r.startswith(("Search error", "Search failed"))
-            if search_failed:
-                emit_progress(config, f'Researcher: search failed for "{q}"', kind="error")
 
             raw_urls = re.findall(r'https?://[^\s<>"\')\]]+', r)
             url_titles = _extract_search_result_titles(r)
@@ -595,10 +883,10 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
             emit_progress(
                 config,
                 f"Researcher: found {len(urls)} candidate {url_label}{dedup_note}",
-                kind="info" if search_failed else "success",
+                kind="success",
             )
 
-            if _scrape_and_collect(
+            scrape_done = _scrape_and_collect(
                 urls,
                 params,
                 max_content_chars,
@@ -613,20 +901,74 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
                 intensity=intensity,
                 model_name=model_name,
                 force_scrape=revise_round,
-            ):
+            )
+            if scrape_done and not item_targeted_revise:
                 # force_scrape suppresses _scrape_and_collect's internal
                 # early-return at min_sources, so all eligible URLs for this
-                # query are scraped. The function returns True because
-                # min_sources is already met, which breaks the query loop.
-                # On a REVISE round only the first query is processed;
-                # the reviewer can issue another REVISE (up to 3) if gaps remain.
+                # query are scraped. Its True return still ends the query
+                # loop on ordinary rounds; item-targeted revise rounds keep
+                # searching up to the 3-query cap so open items get a
+                # genuine attempt.
                 break
 
         if revise_round:
             revise_round = False
 
+    # Search-outage guard: a pass that attempted at least one search and had
+    # every single one fail is an infrastructure error, not evidence
+    # exhaustion. Raise BEFORE the exhaustion rule so a backend outage can
+    # never be recorded as an accepted evidence gap, even when a prior pass
+    # produced findings. A pass that issued no searches (for example a revise
+    # round with no fresh queries) is unaffected: search_failures stays empty.
+    if search_failures and not successful_searches:
+        # Do not fabricate a finding from the error text: that makes the graph
+        # route to the writer and emit a blank report built from an error.
+        raise RuntimeError(
+            f"all {len(search_failures)} searches failed; first error: {search_failures[0][:300]}"
+        )
+
+    # Exhaustion rule: mark open items evidence_exhausted only when this was
+    # a review-driven revise pass, open items exist, the WHOLE pass produced
+    # zero new sources, AND at least two searches SUCCEEDED. Failed searches
+    # never count toward this floor: a failed search is an error, not an empty
+    # result, so it is not evidence that the open items were investigated
+    # (those passes raise above). On an item-targeted revise round where
+    # min_sources is already met the query loop runs up to three searches
+    # (item_targeted_revise above), so two zero-yield successful searches are
+    # a genuine multi-query attempt; one successful search (or zero after
+    # regeneration) leaves items open so attempts can accumulate across
+    # REVISE passes. NOTE for the amended Task 4 routing contract: REVISE
+    # routes back to the researcher iff revision_count < 3 AND at least one
+    # open (non-exhausted) review item remains, otherwise the graph ends;
+    # zero-progress passes still route back while an open item remains.
+    # NOTE for the Task 4 reviewer re-audit: review_items_from_verdict maps
+    # any repeated gap back to status "open", so the reviewer must treat
+    # items the researcher already marked evidence_exhausted distinctly (an
+    # acceptable documented gap) instead of REVISE-ing them anew.
+    # Attribution is intentionally coarse (whole-pass, not per-item): gap
+    # queries are generated per item, but scraped evidence is collected into
+    # one shared pool, so a source cannot be reliably assigned to the item
+    # that motivated it.
+    review_items = state.get("review_items") or []
+    if (
+        revise_pass
+        and open_items
+        and (len(sources) - start_sources) == 0
+        and successful_searches >= 2
+    ):
+        # Build fresh dicts instead of mutating the caller's state in place:
+        # review_items may be shared with the checkpointed graph state, and
+        # in-place writes leak the new statuses back to the caller.
+        review_items = [
+            {**item, "status": "evidence_exhausted"} if item.get("status") == "open" else {**item}
+            for item in review_items
+        ]
+
     if not findings:
         results_text = web_search.invoke({"query": query})
+        if results_text.startswith(("Search error", "Search failed")):
+            # Do not turn a failed content-check search into a finding claim.
+            raise RuntimeError(f"search failed while checking for content: {results_text[:300]}")
         findings.append(
             Finding(
                 claim=f"No scraped content found. Raw search: {results_text[:300]}",
@@ -650,4 +992,7 @@ def researcher_node(state: ResearchState, config: RunnableConfig | None = None) 
         "findings": findings[prior_finding_count:],
         "research_status": research_status,
         "messages": ["\n".join(log)],
+        "review_items": review_items,
+        "last_round_new_sources": len(sources) - start_sources,
+        "last_round_new_findings": len(findings) - start_findings,
     }

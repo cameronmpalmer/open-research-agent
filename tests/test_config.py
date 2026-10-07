@@ -5,12 +5,14 @@ import tempfile
 
 import pytest
 
+import ora.config
 from ora.config import (
     ORASettings,
     get_llm,
     get_researcher_model,
     get_reviewer_model,
     get_supervisor_model,
+    get_writer_model,
     load_config,
 )
 
@@ -20,6 +22,9 @@ class TestORASettings:
         settings = ORASettings()
         assert settings.models.default == "deepseek-v4-flash"
         assert settings.search.provider == "firecrawl"
+        # The Firecrawl fallback is opt-in; silently defaulting it on hides
+        # Decodo failures.
+        assert settings.search.fallback_to_firecrawl is False
         assert settings.limits.max_revisions == 3
         assert settings.limits.default_intensity == 2
         assert settings.deepseek_base_url == "https://api.deepseek.com"
@@ -41,6 +46,146 @@ class TestLoadConfig:
             config = load_config(f.name)
             assert config.limits.default_intensity == 4
             os.unlink(f.name)
+
+    def test_yaml_limits_max_revisions_is_used(self):
+        """A YAML limits.max_revisions value must surface on the loaded
+        settings so the CLI can wire it into the research graph."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("limits:\n  max_revisions: 5\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.limits.max_revisions == 5
+            os.unlink(f.name)
+
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_yaml_limits_max_revisions_below_floor_is_rejected(self, value):
+        """Out-of-range limits.max_revisions fails loudly at load instead of
+        being silently raised to 3 (0) or disabling revisions (negative)."""
+        from pydantic import ValidationError
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(f"limits:\n  max_revisions: {value}\n")
+            f.flush()
+            try:
+                with pytest.raises(ValidationError):
+                    load_config(f.name)
+            finally:
+                os.unlink(f.name)
+
+    def test_yaml_llm_bounds_surface_on_settings(self, monkeypatch):
+        monkeypatch.delenv("ORA_LLM_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.delenv("ORA_LLM_MAX_RETRIES", raising=False)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("llm_timeout_seconds: 42.5\nllm_max_retries: 0\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.llm_timeout_seconds == 42.5
+            assert config.llm_max_retries == 0
+            os.unlink(f.name)
+
+    def test_yaml_without_llm_bounds_uses_defaults(self, monkeypatch):
+        monkeypatch.delenv("ORA_LLM_TIMEOUT_SECONDS", raising=False)
+        monkeypatch.delenv("ORA_LLM_MAX_RETRIES", raising=False)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("limits:\n  max_revisions: 3\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.llm_timeout_seconds == 300.0
+            assert config.llm_max_retries == 2
+
+    def test_yaml_search_block_preserves_env_provider(self, monkeypatch):
+        """A partial search: block must not clobber keys it omits.
+
+        Replacing the whole block silently reset an env ORA_SEARCH__PROVIDER
+        back to the default, so a block holding only firecrawl_api_url would
+        quietly disable Decodo.
+        """
+        monkeypatch.setenv("ORA_SEARCH__PROVIDER", "decodo")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("search:\n  firecrawl_api_url: http://fc.example:3002\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.search.provider == "decodo"
+            assert config.search.firecrawl_api_url == "http://fc.example:3002"
+            os.unlink(f.name)
+
+    def test_yaml_search_provider_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("ORA_SEARCH__PROVIDER", "decodo")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("search:\n  provider: firecrawl\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.search.provider == "firecrawl"
+            os.unlink(f.name)
+
+    def test_yaml_without_search_block_keeps_env_provider(self, monkeypatch):
+        monkeypatch.setenv("ORA_SEARCH__PROVIDER", "decodo")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("limits:\n  max_revisions: 3\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.search.provider == "decodo"
+            os.unlink(f.name)
+
+    def test_yaml_models_block_preserves_env_default(self, monkeypatch):
+        """A partial models: block must not clobber ORA_MODELS__DEFAULT.
+
+        Replacing the whole block discarded the env default whenever the YAML
+        defined only a per-role override.
+        """
+        monkeypatch.setenv("ORA_MODELS__DEFAULT", "env-default-model")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("models:\n  researcher: yaml-researcher-model\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.models.default == "env-default-model"
+            assert config.models.researcher == "yaml-researcher-model"
+            os.unlink(f.name)
+
+    def test_yaml_output_block_preserves_env_key(self, monkeypatch):
+        monkeypatch.setenv("ORA_OUTPUT__ALWAYS_INCLUDE_SOURCES", "false")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("output:\n  default_format: html\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.output.always_include_sources is False
+            assert config.output.default_format == "html"
+            os.unlink(f.name)
+
+    def test_yaml_limits_block_preserves_env_key(self, monkeypatch):
+        monkeypatch.setenv("ORA_LIMITS__MAX_REVISIONS", "7")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("limits:\n  default_intensity: 4\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.limits.max_revisions == 7
+            assert config.limits.default_intensity == 4
+            os.unlink(f.name)
+
+    def test_yaml_blocks_still_override_env_for_keys_they_define(self, monkeypatch):
+        """YAML still wins for the keys it defines."""
+        monkeypatch.setenv("ORA_MODELS__DEFAULT", "env-default-model")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("models:\n  default: yaml-default-model\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.models.default == "yaml-default-model"
+            os.unlink(f.name)
+
+    def test_yaml_bare_blocks_are_treated_as_empty(self):
+        """A bare ``key:`` (parsed as None) must not raise AttributeError."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("models:\nsearch:\noutput:\nlimits:\nprovider:\nproviders:\n")
+            f.flush()
+            config = load_config(f.name)
+            os.unlink(f.name)
+        # Every block falls back to its defaults instead of crashing.
+        assert config.models.default == "deepseek-v4-flash"
+        assert config.search.provider == "firecrawl"
+        assert config.output.default_format == "markdown"
+        assert config.limits.max_revisions == 3
+        assert config.provider.default == "deepseek"
+        assert config.providers == {}
 
     def test_get_researcher_model_defaults_to_default(self):
         settings = ORASettings()
@@ -160,6 +305,56 @@ class TestGetLlmRouting:
             get_llm("custom:my-model")
 
 
+def test_get_llm_passes_timeout_and_retries(monkeypatch):
+    captured = {}
+
+    def fake_chat_openai(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    # get_llm imports ChatOpenAI lazily from langchain_openai, so patch there.
+    # Isolate load_config so a real ~/.ora/config.yaml cannot leak in.
+    monkeypatch.setattr("langchain_openai.ChatOpenAI", fake_chat_openai)
+    monkeypatch.setattr("ora.config.load_config", lambda *a, **kw: ORASettings())
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    # Clear ambient ORA_LLM_* so an exported value cannot override the defaults.
+    monkeypatch.delenv("ORA_LLM_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("ORA_LLM_MAX_RETRIES", raising=False)
+
+    ora.config.get_llm("deepseek/deepseek-v4-flash", temperature=0)
+
+    assert captured["max_retries"] == 2
+    # Pin the canonical field name: "timeout" is only an alias, so accepting
+    # either would not catch a regression to the wrong kwarg.
+    assert captured["request_timeout"] == 300.0
+
+
+def test_get_llm_honours_configured_timeout_and_retries(monkeypatch):
+    captured = {}
+
+    def fake_chat_openai(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("langchain_openai.ChatOpenAI", fake_chat_openai)
+    settings = ORASettings()
+    settings.llm_timeout_seconds = 42.5
+    settings.llm_max_retries = 0
+    monkeypatch.setattr("ora.config.load_config", lambda *a, **kw: settings)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    # Ambient ORA_LLM_* cannot affect this test (attributes are set directly),
+    # but clear them so the test reads the same regardless of the environment.
+    monkeypatch.delenv("ORA_LLM_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("ORA_LLM_MAX_RETRIES", raising=False)
+
+    ora.config.get_llm("deepseek/deepseek-v4-flash", temperature=0)
+
+    assert captured["max_retries"] == 0
+    # Pin the canonical field name: "timeout" is only an alias, so accepting
+    # either would not catch a regression to the wrong kwarg.
+    assert captured["request_timeout"] == 42.5
+
+
 class TestSplitProvider:
     def test_no_prefix(self):
         from ora.config import _split_provider
@@ -274,3 +469,124 @@ class TestRunModelOverrides:
         settings = ORASettings(models=ModelSettings(default="my-default"))
         set_model_override("researcher", "openrouter:qwen/qwen3.7-flash")
         assert get_supervisor_model(settings) == "my-default"
+
+
+class TestWriterModelResolution:
+    """The writer's model resolution (ora.config.get_writer_model).
+
+    The writer historically reused the researcher's model, so an unset
+    models.writer must keep resolving to whatever the researcher resolves to.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_overrides(self):
+        from ora.config import clear_model_overrides
+
+        yield
+        clear_model_overrides()
+
+    def test_writer_unset_falls_back_to_researcher(self):
+        """Backward compatibility: unset models.writer uses models.researcher."""
+        from ora.config import ModelSettings
+
+        settings = ORASettings(models=ModelSettings(default="m-default", researcher="m-researcher"))
+        assert get_writer_model(settings) == "m-researcher"
+
+    def test_writer_config_wins_over_researcher(self):
+        from ora.config import ModelSettings
+
+        settings = ORASettings(
+            models=ModelSettings(default="m-default", researcher="m-researcher", writer="m-writer")
+        )
+        assert get_writer_model(settings) == "m-writer"
+
+    def test_writer_run_override_wins_over_config(self):
+        from ora.config import ModelSettings, set_model_override
+
+        settings = ORASettings(models=ModelSettings(default="m-default", writer="m-writer"))
+        set_model_override("writer", "openrouter:qwen/qwen3.7-flash")
+        assert get_writer_model(settings) == "openrouter:qwen/qwen3.7-flash"
+
+    def test_writer_defaults_to_default_when_nothing_set(self):
+        from ora.config import ModelSettings
+
+        settings = ORASettings(models=ModelSettings(default="m-default"))
+        assert get_writer_model(settings) == "m-default"
+
+
+class TestProviderBlockMerge:
+    """A partial provider/providers block must not discard env values.
+
+    CONFIG.md promises that a YAML key only overrides its own env var, and this
+    holds for every nested block including provider and providers.
+    """
+
+    def test_provider_block_preserves_env_default(self, monkeypatch):
+        monkeypatch.setenv("ORA_PROVIDER__DEFAULT", "openrouter")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("provider: {}\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.provider.default == "openrouter"
+            os.unlink(f.name)
+
+    def test_yaml_provider_default_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("ORA_PROVIDER__DEFAULT", "openrouter")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("provider:\n  default: deepseek\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.provider.default == "deepseek"
+            os.unlink(f.name)
+
+    def test_partial_providers_entry_preserves_env_fields(self, monkeypatch):
+        monkeypatch.setenv("ORA_PROVIDERS__OPENROUTER__API_KEY_ENV", "MY_KEY")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("providers:\n  openrouter:\n    base_url: http://x.example/v1\n")
+            f.flush()
+            config = load_config(f.name)
+            assert config.providers["openrouter"].base_url == "http://x.example/v1"
+            assert config.providers["openrouter"].api_key_env == "MY_KEY"
+            os.unlink(f.name)
+
+
+class TestSearchConfigError:
+    """Fail-fast validation of the configured search backend."""
+
+    def test_decodo_without_key_is_an_error(self, monkeypatch):
+        from ora.config import ORASettings, search_config_error
+
+        monkeypatch.delenv("DECODO_API_KEY", raising=False)
+        settings = ORASettings()
+        settings.search.provider = "decodo"
+
+        err = search_config_error(settings)
+
+        assert err and "DECODO_API_KEY" in err
+
+    def test_decodo_with_key_is_ok(self, monkeypatch):
+        from ora.config import ORASettings, search_config_error
+
+        monkeypatch.setenv("DECODO_API_KEY", "some-key")
+        settings = ORASettings()
+        settings.search.provider = "decodo"
+
+        assert search_config_error(settings) is None
+
+    def test_decodo_key_whitespace_only_is_an_error(self, monkeypatch):
+        from ora.config import ORASettings, search_config_error
+
+        monkeypatch.setenv("DECODO_API_KEY", "   ")
+        settings = ORASettings()
+        settings.search.provider = "decodo"
+
+        assert search_config_error(settings) is not None
+
+    def test_firecrawl_needs_no_key(self, monkeypatch):
+        from ora.config import ORASettings, search_config_error
+
+        monkeypatch.delenv("DECODO_API_KEY", raising=False)
+        settings = ORASettings()
+        settings.search.provider = "firecrawl"
+
+        assert search_config_error(settings) is None
