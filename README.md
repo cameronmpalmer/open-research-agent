@@ -2,7 +2,7 @@
 
 Open Research Agent (ORA) is an open-source multi-agent research CLI. ORA plans research, searches and scrapes web sources, synthesizes findings, and optionally uses an adversarial reviewer for higher-intensity research.
 
-Current release: **0.2.0**
+Current release: **0.3.0**
 
 ## What ORA does
 
@@ -16,7 +16,7 @@ ORA turns a research question into a sourced markdown report:
 
 ## Current backend support
 
-ORA 0.2.0 supports two LLM backends:
+ORA 0.3.0 supports two LLM backends:
 
 - **DeepSeek API** (default), models like `deepseek-v4-flash` and `deepseek-v4-pro`
 - **OpenRouter**, an OpenAI-compatible gateway to many models, e.g. `anthropic/claude-3.5-sonnet` via `openrouter:anthropic/claude-3.5-sonnet`

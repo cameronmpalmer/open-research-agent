@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-07
 
 Search reliability and research throughput.
 
@@ -33,6 +33,12 @@ Search reliability and research throughput.
 - Usage and cost accounting now works from concurrent workers.
 - Removed the deprecated `create_search_tool` helper from `ora.tools.search`
   (a public symbol in 0.1.0); use the `web_search` tool instead.
+
+## 0.2.0 - 2026-06-10
+
+- OpenRouter backend alongside DeepSeek, selected per model with a `provider:model` prefix.
+- Provider settings moved into `config.yaml` (`provider.default`, `providers`).
+- Usage and cost summary after a run.
 
 ## 0.1.0
 

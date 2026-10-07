@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "open-research-agent"
-version = "0.1.0"
+version = "0.3.0"
 description = "Open Research Agent - multi-agent research with adversarial review"
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
