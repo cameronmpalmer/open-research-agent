@@ -190,6 +190,127 @@ class TestFoldRepeatedExhausted:
         assert verdict.blocking == ["Add pricing"]
         assert verdict.unresolvable_gaps == []
 
+    @pytest.mark.parametrize(
+        "notes",
+        [
+            "## Changes made\n- [blocking] X: unresolved - no public data found.\n",
+            "## Changes made\n- [required] X: not resolved - no public data found.\n",
+            "## Changes made\n- [blocking] X: never resolved - no public data found.\n",
+        ],
+    )
+    def test_negated_disposition_is_not_acknowledgment(self, notes):
+        """A negated disposition ("unresolved", "not resolved", "never
+        resolved") must not satisfy the "resolved" marker. The previous
+        substring test let "unresolved" match "resolved" and folded an item the
+        writer had explicitly NOT acknowledged, ending the loop before the
+        limitation was documented."""
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["X"]),
+            self._exhausted(),
+            writer_change_notes=notes,
+            is_final_audit=False,
+        )
+
+        assert verdict.blocking == ["X"]
+        assert verdict.unresolvable_gaps == []
+
+    def test_superset_restatement_is_not_acknowledgment(self):
+        """A disposition line that restates a longer text (a superset) must not
+        acknowledge the shorter item: the restatement has to be the exact item
+        text, so "Add pricing details" does not acknowledge "Add pricing"."""
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["Add pricing"]),
+            self._exhausted("Add pricing"),
+            writer_change_notes="## Changes made\n- [blocking] Add pricing details: resolved.\n",
+            is_final_audit=False,
+        )
+
+        assert verdict.blocking == ["Add pricing"]
+        assert verdict.unresolvable_gaps == []
+
+    def test_acknowledgment_requires_the_disposition_after_a_colon(self):
+        """The marker must sit in the disposition that follows the restated
+        item, not merely anywhere on a line that happens to contain the text."""
+        from ora.agents.reviewer import _notes_acknowledge_item
+
+        assert _notes_acknowledge_item("- [blocking] X: resolved.\n", "X") is True
+        assert _notes_acknowledge_item("- [blocking] X: unresolved.\n", "X") is False
+        assert _notes_acknowledge_item("- [blocking] X resolved elsewhere.\n", "X") is False
+        assert _notes_acknowledge_item("- [blocking] X details: resolved.\n", "X") is False
+
+    def test_item_text_containing_a_colon_is_acknowledged(self):
+        """An item whose own text contains a colon must still be acknowledged:
+        the delimiter is the colon that follows the whole restated item, not the
+        first colon on the line."""
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["Add pricing: US and EU"]),
+            self._exhausted("Add pricing: US and EU"),
+            writer_change_notes=(
+                "## Changes made\n- [blocking] Add pricing: US and EU: resolved - added sources.\n"
+            ),
+            is_final_audit=False,
+        )
+
+        assert verdict.blocking == []
+        assert verdict.unresolvable_gaps == ["Add pricing: US and EU"]
+
+    def test_numbered_disposition_marker_is_acknowledged(self):
+        """Numbered list markers ("1." / "1)") are valid disposition lines."""
+        from ora.agents.reviewer import _notes_acknowledge_item
+
+        assert _notes_acknowledge_item("1. [blocking] X: resolved.\n", "X") is True
+        assert _notes_acknowledge_item("1) [blocking] X: resolved.\n", "X") is True
+
+    def test_status_token_in_restatement_is_acknowledged(self):
+        """The writer is shown review items as "- [category] (status) text", so
+        restating that line verbatim (including the (status) token) must still
+        count as acknowledgment, not silently stay blocking."""
+        from ora.agents.reviewer import _fold_repeated_exhausted
+
+        verdict = _fold_repeated_exhausted(
+            self._verdict(blocking=["Add pricing"]),
+            self._exhausted("Add pricing"),
+            writer_change_notes="## Changes made\n- [blocking] (open) Add pricing: resolved.\n",
+            is_final_audit=False,
+        )
+        assert verdict.blocking == []
+        assert verdict.unresolvable_gaps == ["Add pricing"]
+
+        documented = _fold_repeated_exhausted(
+            self._verdict(required=["2026 outlook unavailable in sources"]),
+            [
+                {
+                    "category": "required",
+                    "text": "2026 outlook unavailable in sources",
+                    "status": "evidence_exhausted",
+                }
+            ],
+            writer_change_notes=(
+                "## Changes made\n- [required] (evidence_exhausted) 2026 outlook"
+                " unavailable in sources: documented as a gap.\n"
+            ),
+            is_final_audit=False,
+        )
+        assert documented.required == []
+        assert documented.unresolvable_gaps == ["2026 outlook unavailable in sources"]
+
+    @pytest.mark.parametrize(
+        "disposition",
+        ["cannot be resolved", "not yet resolved", "not  resolved", "could not resolve"],
+    )
+    def test_extended_negation_is_not_acknowledgment(self, disposition):
+        """Broader negations must not satisfy the "resolved" marker: the
+        disposition has to begin with a declared disposition token."""
+        from ora.agents.reviewer import _notes_acknowledge_item
+
+        assert _notes_acknowledge_item(f"- [blocking] X: {disposition}.\n", "X") is False
+
     def test_exhausted_undocumented_final_audit_folds(self):
         from ora.agents.reviewer import _fold_repeated_exhausted
 

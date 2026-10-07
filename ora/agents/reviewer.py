@@ -1,6 +1,7 @@
 """Adversarial reviewer agent node for LangGraph."""
 
 import json
+import re
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -72,33 +73,68 @@ def _norm_item_text(text: str) -> str:
 
 
 # Disposition vocabulary the writer uses in its "Changes made" notes
-# (see REVISION_PROMPT). A previously-exhausted item counts as acknowledged
-# when the writer restated the item next to one of these markers.
+# (see REVISION_PROMPT): resolved / partially addressed / documented as a gap.
 _ACKNOWLEDGED_MARKERS = ("resolved", "partially addressed", "documented as a gap")
+
+# A disposition line restates the item, then a colon, then the disposition:
+# "- [<category>] <exact item text>: <disposition>". The list marker (dash,
+# star, or a number such as "1." / "1)"), the bracketed category, and the
+# "(status)" token the writer is shown in REVIEW ITEMS are all optional so
+# minor formatting drift still parses. The restatement is then matched against
+# the whole item text, so a superset or near-duplicate ("Add pricing details"
+# for the item "Add pricing") does not acknowledge it.
+_DISPOSITION_PREFIX_RE = re.compile(
+    r"^\s*(?:[-*]|\d+[.)])?\s*(?:\[[^\]]*\]\s*)?(?:\((?:open|evidence_exhausted)\)\s*)?"
+)
+
+
+def _disposition_acknowledges(disposition: str) -> bool:
+    """True when a disposition segment begins with a declared disposition token.
+
+    Requiring the token to lead the segment, rather than appear anywhere in it,
+    makes negations non-acknowledgments ("unresolved", "not resolved",
+    "cannot be resolved", "not yet resolved"), and the whole-token boundary
+    keeps a word such as "resolvedly" from matching.
+    """
+    token = disposition.lstrip(" \t*_`")
+    for marker in _ACKNOWLEDGED_MARKERS:
+        if token.startswith(marker):
+            rest = token[len(marker) :]
+            if not rest or not rest[0].isalnum():
+                return True
+    return False
 
 
 def _notes_acknowledge_item(notes: str, text: str) -> bool:
     """True when the writer's change notes respond to the item.
 
     The writer's change notes restate the item text together with a
-    disposition marker (resolved / partially addressed / documented as a
-    gap) on the same line, for example
+    disposition marker (resolved / partially addressed / documented as a gap)
+    on the same line, for example
     "- [blocking] Add pricing details: resolved." An item whose text merely
     appears somewhere in the notes (a near-duplicate the writer actually
     addressed, say "Add pricing details" when the item is "Add pricing") is
-    not acknowledgment, so the item text must co-occur with a marker on one
-    line. Matching is normalized (strip + casefold).
+    not acknowledgment, so the restatement must be the item text and the
+    disposition that follows its colon must begin with a declared token.
+    Matching is normalized (strip + casefold).
     """
     if not notes or not text:
         return False
-    norm_notes = _norm_item_text(notes)
     norm_text = _norm_item_text(text)
     if not norm_text:
         return False
-    return any(
-        norm_text in line and any(marker in line for marker in _ACKNOWLEDGED_MARKERS)
-        for line in norm_notes.splitlines()
-    )
+    for raw_line in notes.splitlines():
+        line = _norm_item_text(raw_line)
+        prefix = _DISPOSITION_PREFIX_RE.match(line)
+        rest = line[prefix.end() :] if prefix else line
+        if not rest.startswith(norm_text):
+            continue
+        after = rest[len(norm_text) :].lstrip()
+        # The restatement must be followed by the disposition delimiter, so a
+        # longer superset restatement (for example "X details:") does not count.
+        if after.startswith(":") and _disposition_acknowledges(after[1:]):
+            return True
+    return False
 
 
 def _should_fold_repeated_exhausted(
